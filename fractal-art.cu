@@ -1,3 +1,4 @@
+#include <cuda_runtime.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,11 +11,13 @@
 #define SCALE 2 // maximum X value in the fractal graph
 #define ITERATIONS (1 << 8) // number of iteration for checking divergence
 #define R (1 << 8) // ceiling upon which function is considered divergent
-#define SHADOW_DISTANCE 4 // radius of the circular shadow plot
+#define SHADOW_DISTANCE 16 // radius of the circular shadow plot
 #define SHADOW_SHARPNESS 1 // rapidity with which shadow gets dark
 #define SHADOW_TILT_H -64 // horizontal offset from where shadow is plotted
 #define SHADOW_TILT_V 32 // vertical offset from where shadow is plotted
 #define SHADOW_INTENSITY 0.8 // blackness of the shadow
+
+#define BLOCK_DIM 16
 
 typedef unsigned char byte;
 typedef struct complex {
@@ -55,9 +58,9 @@ int main(int argc, char** argv) {
     c.i = strtod(argv[2], NULL);
 
     // Allocate memory for input and output images
-    byte* image = malloc(V_RES * H_RES * 3);
-    byte* inside = malloc(V_RES * H_RES * 3);
-    byte* outside = malloc(V_RES * H_RES * 3);
+    byte* image = (byte*)malloc(V_RES * H_RES * 3);
+    byte* inside = (byte*)malloc(V_RES * H_RES * 3);
+    byte* outside = (byte*)malloc(V_RES * H_RES * 3);
 
     // Load the two input images
     if (load_image("inside.ppm", inside) < 0) {
@@ -90,7 +93,7 @@ int main(int argc, char** argv) {
 
 /// The first iteration generates a black and white image (mask) where
 /// pixels inside the fractal are black and pixels outside are white.
-void __compute_mask(int h, int v, int h_max, int v_max, const complex* c, byte* mask);
+__global__ void __compute_mask(int h_max, int v_max, const complex c, byte* mask);
 
 /// The second iteration plots a circular shadow for each white pixel of
 /// the just generated fractal mask.
@@ -111,35 +114,47 @@ void generate_fractal(const complex* c, byte* image, const byte* inside, const b
 #define V_EXTENDED (V_RES + 2 * (abs(SHADOW_TILT_V) + SHADOW_DISTANCE))
 
     // Allocate memory for fractal mask and shadow
-    byte* mask = calloc(V_EXTENDED * H_EXTENDED, sizeof(byte));
-    int* shadow = calloc(V_EXTENDED * H_EXTENDED, sizeof(int));
+    byte* mask_d, * mask_h;
+    int* shadow_d, * shadow_h;
+    mask_h = (byte*)calloc(V_EXTENDED * H_EXTENDED, sizeof(byte));
+    shadow_h = (int*)calloc(V_EXTENDED * H_EXTENDED, sizeof(int));
+    cudaMalloc(&mask_d, V_EXTENDED * H_EXTENDED * sizeof(byte));
+    cudaMemset(mask_d, 0x00, V_EXTENDED * H_EXTENDED * sizeof(byte));
+    cudaMalloc(&shadow_d, V_EXTENDED * H_EXTENDED * sizeof(int));
+    cudaMemset(shadow_d, 0, V_EXTENDED * H_EXTENDED * sizeof(int));
 
     // For each pixel compute fractal mask
-    for (int h = 0; h < H_EXTENDED; h++)
-        for (int v = 0; v < V_EXTENDED; v++)
-            __compute_mask(h, v, H_EXTENDED, V_EXTENDED, c, mask);
+    dim3 block_size(BLOCK_DIM, BLOCK_DIM);
+    dim3 grid_size(ceil(H_EXTENDED / block_size.x), ceil(V_EXTENDED / block_size.y));
+    __compute_mask << <grid_size, block_size >> > (H_EXTENDED, V_EXTENDED, *c, mask_d);
+
+    cudaMemcpy(mask_h, mask_d, V_EXTENDED * H_EXTENDED * sizeof(byte), cudaMemcpyDeviceToHost);
 
     // For each pixel compute shadow value
     for (int h = 0; h < H_EXTENDED; h++)
         for (int v = 0; v < V_EXTENDED; v++)
-            __apply_shadow(h, v, H_EXTENDED, V_EXTENDED, mask, shadow);
+            __apply_shadow(h, v, H_EXTENDED, V_EXTENDED, mask_h, shadow_h);
 
     // For each pixel select final image, computing its shadow
     for (int h = 0; h < H_RES; h++)
         for (int v = 0; v < V_RES; v++)
-            __assign_final(h, v, shadow, mask, inside, outside, image);
+            __assign_final(h, v, shadow_h, mask_h, inside, outside, image);
 
     // Free fractal mask and shadow memory
-    free(mask);
-    free(shadow);
+    free(mask_h);
+    free(shadow_h);
+    cudaFree(mask_d);
+    cudaFree(shadow_d);
 
 #undef H_EXTENDED
 #undef V_EXTENDED
 }
 
-void __compute_mask(int h, int v, int h_max, int v_max, const complex* c, byte* mask) {
+__global__ void __compute_mask(int h_max, int v_max, const complex c, byte* mask) {
 
     // Calculate index of the pixel
+    int h = blockIdx.x * blockDim.x + threadIdx.x;
+    int v = blockIdx.y * blockDim.y + threadIdx.y;
     int idx = v * h_max + h;
 
     // Calculate coordinates of the pixel in the complex plane
@@ -152,7 +167,7 @@ void __compute_mask(int h, int v, int h_max, int v_max, const complex* c, byte* 
 
         // Compute function z1 = z0^2 + c
         cmul(&z1, &z0, &z0);
-        csum(&z1, &z1, c);
+        csum(&z1, &z1, &c);
         z0.r = z1.r;
         z0.i = z1.i;
 
