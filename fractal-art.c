@@ -16,10 +16,6 @@
 #define SHADOW_TILT_V 32 // vertical offset from where shadow is plotted
 #define SHADOW_INTENSITY 0.8 // blackness of the shadow
 
-typedef enum {
-    false,
-    true
-} bool;
 typedef unsigned char byte;
 typedef struct complex {
     double r;
