@@ -40,9 +40,6 @@ int save_image(const char* filename, unsigned char* image);
 /// Load ppm image from disk
 int load_image(const char* filename, unsigned char* image);
 
-/// Side length of a pixel in the complex plane
-double res_unit = (double)SCALE / (H_RES / 2);
-
 int main(int argc, char** argv) {
 
     // Retrieve c constant from input args
@@ -142,6 +139,9 @@ void __compute_mask(int h, int v, int h_max, int v_max, const complex* c, byte* 
     // Calculate index of the pixel
     int idx = v * h_max + h;
 
+    // Calculate the side length of a pixel in the complex plane
+    double res_unit = (double)SCALE / (H_RES / 2);
+
     // Calculate coordinates of the pixel in the complex plane
     complex z0, z1;
     z0.r = res_unit * (h - h_max / 2) + CENTER_X;
@@ -210,9 +210,9 @@ void __assign_final(int h, int v, const int* shadow, const byte* mask, const byt
     } else {
 
         // Shadow intensity computation
-        float toner = ((exp(-SHADOW_SHARPNESS * shadow[idx_framed] /
+        float toner = (exp(-SHADOW_SHARPNESS * shadow[idx_framed] /
             (3.1416 * SHADOW_DISTANCE * SHADOW_DISTANCE))) *
-            SHADOW_INTENSITY + (1 - SHADOW_INTENSITY));
+            SHADOW_INTENSITY + (1 - SHADOW_INTENSITY);
 
         // Inside image assignment with shadow
         image[3 * idx + 0] = inside[3 * idx + 0] * toner;

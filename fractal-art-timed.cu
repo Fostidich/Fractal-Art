@@ -110,9 +110,16 @@ __host__ void generate_fractal(const complex* c, byte* image, const byte* inside
     // Required horizontal dimension due to shadow offset
 #define V_EXTENDED (V_RES + 2 * (abs(SHADOW_TILT_V) + SHADOW_DISTANCE))
 
+    // Initialized events
+    float time;
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+
     // Allocate memory
     byte* mask_d, * inside_d, * outside_d, * image_d;
     int* shadow_d;
+    cudaEventRecord(start);
     cudaMalloc(&mask_d, V_EXTENDED * H_EXTENDED * sizeof(byte));
     cudaMalloc(&shadow_d, V_EXTENDED * H_EXTENDED * sizeof(int));
     cudaMalloc(&inside_d, 3 * V_RES * H_RES * sizeof(byte));
@@ -122,31 +129,54 @@ __host__ void generate_fractal(const complex* c, byte* image, const byte* inside
     // Data initialization
     cudaMemset(mask_d, 0x00, V_EXTENDED * H_EXTENDED * sizeof(byte));
     cudaMemset(shadow_d, 0, V_EXTENDED * H_EXTENDED * sizeof(int));
+    cudaEventRecord(stop);
+    cudaEventElapsedTime(&time, start, stop);
+    printf("Memory allocations: %f\n", time);
 
     // Data transfer to device
+    cudaEventRecord(start);
     cudaMemcpy(inside_d, inside, 3 * V_RES * H_RES * sizeof(byte), cudaMemcpyHostToDevice);
     cudaMemcpy(outside_d, outside, 3 * V_RES * H_RES * sizeof(byte), cudaMemcpyHostToDevice);
+    cudaEventRecord(stop);
+    cudaEventElapsedTime(&time, start, stop);
+    printf("Memory transfers to device: %f\n", time);
 
     dim3 block_size, grid_size;
     block_size = dim3(BLOCK_DIM, BLOCK_DIM);
 
     // For each pixel compute fractal mask
+    cudaEventRecord(start);
     grid_size = dim3(ceil(H_EXTENDED / block_size.x), ceil(V_EXTENDED / block_size.y));
     __compute_mask << <grid_size, block_size >> > (H_EXTENDED, V_EXTENDED, *c, mask_d);
     cudaDeviceSynchronize();
+    cudaEventRecord(stop);
+    cudaEventElapsedTime(&time, start, stop);
+    printf("Mask computation: %f\n", time);
 
     // For each pixel compute shadow value
+    cudaEventRecord(start);
     grid_size = dim3(ceil(H_EXTENDED / block_size.x), ceil(V_EXTENDED / block_size.y));
     __apply_shadow << <grid_size, block_size >> > (H_EXTENDED, V_EXTENDED, mask_d, shadow_d);
     cudaDeviceSynchronize();
+    cudaEventRecord(stop);
+    cudaEventElapsedTime(&time, start, stop);
+    printf("Shadow application: %f\n", time);
 
     // For each pixel select final image, computing its shadow
+    cudaEventRecord(start);
     grid_size = dim3(ceil(H_RES / block_size.x), ceil(V_RES / block_size.y));
     __assign_final << <grid_size, block_size >> > (shadow_d, mask_d, inside_d, outside_d, image_d);
     cudaDeviceSynchronize();
+    cudaEventRecord(stop);
+    cudaEventElapsedTime(&time, start, stop);
+    printf("Final assignment: %f\n", time);
 
     // Data transfer to host
+    cudaEventRecord(start);
     cudaMemcpy(image, image_d, 3 * V_RES * H_RES * sizeof(byte), cudaMemcpyDeviceToHost);
+    cudaEventRecord(stop);
+    cudaEventElapsedTime(&time, start, stop);
+    printf("Memory transfers to host: %f\n", time);
 
     // Free the allocated memory
     cudaFree(mask_d);
@@ -154,6 +184,10 @@ __host__ void generate_fractal(const complex* c, byte* image, const byte* inside
     cudaFree(inside_d);
     cudaFree(outside_d);
     cudaFree(image_d);
+
+    // Destroy events
+    cudaEventDestroy(start);
+    cudaEventDestroy(stop);
 
 #undef H_EXTENDED
 #undef V_EXTENDED
