@@ -23,24 +23,24 @@ typedef struct complex {
 } complex;
 
 /// Calculate fractal and shadow for each pixel point and assign images respectively
-void generate_fractal(const complex* c, byte* image, const byte* inside, const byte* outside);
+void generate_fractal(const complex *c, byte *image, const byte *inside, const byte *outside);
 
 /// Complex multiplication
-void cmul(complex* outcome, const complex* first, const complex* second);
+void cmul(complex *outcome, const complex *first, const complex *second);
 
 /// Complex sum
-void csum(complex* outcome, const complex* first, const complex* second);
+void csum(complex *outcome, const complex *first, const complex *second);
 
 /// Complex absolute value
-double cmod(const complex* z);
+double cmod(const complex *z);
 
 /// Save ppm image on disk
-int save_image(const char* filename, unsigned char* image);
+int save_image(const char *filename, unsigned char *image);
 
 /// Load ppm image from disk
-int load_image(const char* filename, unsigned char* image);
+int load_image(const char *filename, unsigned char *image);
 
-int main(int argc, char** argv) {
+int main(int argc, char **argv) {
 
     // Retrieve c constant from input args
     if (argc != 3) {
@@ -52,9 +52,9 @@ int main(int argc, char** argv) {
     c.i = strtod(argv[2], NULL);
 
     // Allocate memory for input and output images
-    byte* image = malloc(V_RES * H_RES * 3);
-    byte* inside = malloc(V_RES * H_RES * 3);
-    byte* outside = malloc(V_RES * H_RES * 3);
+    byte *image = malloc(V_RES * H_RES * 3);
+    byte *inside = malloc(V_RES * H_RES * 3);
+    byte *outside = malloc(V_RES * H_RES * 3);
 
     // Load the two input images
     if (load_image("inside.ppm", inside) < 0) {
@@ -87,29 +87,29 @@ int main(int argc, char** argv) {
 
 /// The first iteration generates a black and white image (mask) where
 /// pixels inside the fractal are black and pixels outside are white.
-void __compute_mask(int h, int v, int h_max, int v_max, const complex* c, byte* mask);
+void __compute_mask(int h, int v, int h_max, int v_max, const complex *c, byte *mask);
 
 /// The second iteration plots a circular shadow for each white pixel of
 /// the just generated fractal mask.
 /// This is done by adding one to the corresponding elements of the shadow
 /// integer array (sized like fractal mask).
 /// The higher is the number, the higher is the shadow intensity.
-void __apply_shadow(int h, int v, int h_max, int v_max, const byte* mask, int* shadow);
+void __apply_shadow(int h, int v, int h_max, int v_max, const byte *mask, int *shadow);
 
 /// The third iteration assigns the inside and the outside images.
 /// The shadow toner for the inner image is computed starting from the corresponding
 /// value in the shadow array.
-void __assign_final(int h, int v, const int* shadow, const byte* mask, const byte* inside, const byte* outside, byte* image);
+void __assign_final(int h, int v, const int *shadow, const byte *mask, const byte *inside, const byte *outside, byte *image);
 
-void generate_fractal(const complex* c, byte* image, const byte* inside, const byte* outside) {
+void generate_fractal(const complex *c, byte *image, const byte *inside, const byte *outside) {
     // required vertical dimension due to shadow offset
 #define H_EXTENDED (H_RES + 2 * (abs(SHADOW_TILT_H) + SHADOW_DISTANCE))
     // required horizontal dimension due to shadow offset
 #define V_EXTENDED (V_RES + 2 * (abs(SHADOW_TILT_V) + SHADOW_DISTANCE))
 
     // Allocate memory for fractal mask and shadow
-    byte* mask = calloc(V_EXTENDED * H_EXTENDED, sizeof(byte));
-    int* shadow = calloc(V_EXTENDED * H_EXTENDED, sizeof(int));
+    byte *mask = calloc(V_EXTENDED * H_EXTENDED, sizeof(byte));
+    int *shadow = calloc(V_EXTENDED * H_EXTENDED, sizeof(int));
 
     // For each pixel compute fractal mask
     for (int h = 0; h < H_EXTENDED; h++)
@@ -134,7 +134,7 @@ void generate_fractal(const complex* c, byte* image, const byte* inside, const b
 #undef V_EXTENDED
 }
 
-void __compute_mask(int h, int v, int h_max, int v_max, const complex* c, byte* mask) {
+void __compute_mask(int h, int v, int h_max, int v_max, const complex *c, byte *mask) {
 
     // Calculate index of the pixel
     int idx = v * h_max + h;
@@ -166,7 +166,7 @@ void __compute_mask(int h, int v, int h_max, int v_max, const complex* c, byte* 
     }
 }
 
-void __apply_shadow(int h, int v, int h_max, int v_max, const byte* mask, int* shadow) {
+void __apply_shadow(int h, int v, int h_max, int v_max, const byte *mask, int *shadow) {
 
     // Calculate index of the pixel
     int idx = v * h_max + h;
@@ -192,7 +192,7 @@ void __apply_shadow(int h, int v, int h_max, int v_max, const byte* mask, int* s
     }
 }
 
-void __assign_final(int h, int v, const int* shadow, const byte* mask, const byte* inside, const byte* outside, byte* image) {
+void __assign_final(int h, int v, const int *shadow, const byte *mask, const byte *inside, const byte *outside, byte *image) {
 
     // Calculate index of the pixel
     int idx = v * H_RES + h;
@@ -224,22 +224,22 @@ void __assign_final(int h, int v, const int* shadow, const byte* mask, const byt
 #undef IN
 #undef OUT
 
-inline void cmul(complex* outcome, const complex* first, const complex* second) {
+inline void cmul(complex *outcome, const complex *first, const complex *second) {
     outcome->r = first->r * second->r - first->i * second->i;
     outcome->i = first->r * second->i + first->i * second->r;
 }
 
-inline void csum(complex* outcome, const complex* first, const complex* second) {
+inline void csum(complex *outcome, const complex *first, const complex *second) {
     outcome->r = first->r + second->r;
     outcome->i = first->i + second->i;
 }
 
-inline double cmod(const complex* z) {
+inline double cmod(const complex *z) {
     return sqrt(z->r * z->r + z->i * z->i);
 }
 
-int save_image(const char* filename, unsigned char* image) {
-    FILE* f = fopen(filename, "wb");
+int save_image(const char *filename, unsigned char *image) {
+    FILE *f = fopen(filename, "wb");
     if (f == NULL) return -1;
     fprintf(f, "P6\n%d %d\n%d\n", H_RES, V_RES, 255);
     fwrite(image, sizeof(unsigned char), H_RES * V_RES * 3, f);
@@ -247,8 +247,8 @@ int save_image(const char* filename, unsigned char* image) {
     return 0;
 }
 
-int load_image(const char* filename, unsigned char* image) {
-    FILE* f = fopen(filename, "rb");
+int load_image(const char *filename, unsigned char *image) {
+    FILE *f = fopen(filename, "rb");
     if (f == NULL) return -1;
     char temp1[4];
     int temp2, h, v;

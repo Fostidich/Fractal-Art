@@ -24,24 +24,24 @@ typedef struct complex {
 } complex;
 
 /// Calculate fractal and shadow for each pixel point and assign images respectively
-__host__ void generate_fractal(const complex* c, byte* image, const byte* inside, const byte* outside);
+__host__ void generate_fractal(const complex *c, byte *image, const byte *inside, const byte *outside);
 
 /// Complex multiplication
-__host__ __device__ void cmul(complex* outcome, const complex* first, const complex* second);
+__host__ __device__ void cmul(complex *outcome, const complex *first, const complex *second);
 
 /// Complex sum
-__host__ __device__ void csum(complex* outcome, const complex* first, const complex* second);
+__host__ __device__ void csum(complex *outcome, const complex *first, const complex *second);
 
 /// Complex absolute value
-__host__ __device__ double cmod(const complex* z);
+__host__ __device__ double cmod(const complex *z);
 
 /// Save ppm image on disk
-int save_image(const char* filename, unsigned char* image);
+int save_image(const char *filename, unsigned char *image);
 
 /// Load ppm image from disk
-int load_image(const char* filename, unsigned char* image);
+int load_image(const char *filename, unsigned char *image);
 
-int main(int argc, char** argv) {
+int main(int argc, char **argv) {
 
     // Retrieve c constant from input args
     if (argc != 3) {
@@ -53,9 +53,9 @@ int main(int argc, char** argv) {
     c.i = strtod(argv[2], NULL);
 
     // Allocate memory for input and output images
-    byte* image = (byte*)malloc(3 * V_RES * H_RES * sizeof(byte));
-    byte* inside = (byte*)malloc(3 * V_RES * H_RES * sizeof(byte));
-    byte* outside = (byte*)malloc(3 * V_RES * H_RES * sizeof(byte));
+    byte *image = (byte *)malloc(3 * V_RES * H_RES * sizeof(byte));
+    byte *inside = (byte *)malloc(3 * V_RES * H_RES * sizeof(byte));
+    byte *outside = (byte *)malloc(3 * V_RES * H_RES * sizeof(byte));
 
     // Load the two input images
     if (load_image("inside.ppm", inside) < 0) {
@@ -88,21 +88,21 @@ int main(int argc, char** argv) {
 
 /// The first iteration generates a black and white image (mask) where
 /// pixels inside the fractal are black and pixels outside are white.
-__global__ void __compute_mask(int h_max, int v_max, const complex c, byte* __restrict__ mask);
+__global__ void __compute_mask(int h_max, int v_max, const complex c, byte *__restrict__ mask);
 
 /// The second iteration plots a circular shadow for each white pixel of
 /// the just generated fractal mask.
 /// This is done by adding one to the corresponding elements of the shadow
 /// integer array (sized like fractal mask).
 /// The higher is the number, the higher is the shadow intensity.
-__global__ void __apply_shadow(int h_max, int v_max, const byte* __restrict__ mask, int* __restrict__ shadow);
+__global__ void __apply_shadow(int h_max, int v_max, const byte *__restrict__ mask, int *__restrict__ shadow);
 
 /// The third iteration assigns the inside and the outside images.
 /// The shadow toner for the inner image is computed starting from the corresponding
 /// value in the shadow array.
-__global__ void __assign_final(const int* __restrict__ shadow, const byte* __restrict__ mask, const byte* __restrict__ inside, const byte* __restrict__ outside, byte* __restrict__ image);
+__global__ void __assign_final(const int *__restrict__ shadow, const byte *__restrict__ mask, const byte *__restrict__ inside, const byte *__restrict__ outside, byte *__restrict__ image);
 
-__host__ void generate_fractal(const complex* c, byte* image, const byte* inside, const byte* outside) {
+__host__ void generate_fractal(const complex *c, byte *image, const byte *inside, const byte *outside) {
     // Block dimensions for kernels
 #define BLOCK_DIM 16
     // Required vertical dimension due to shadow offset
@@ -111,8 +111,8 @@ __host__ void generate_fractal(const complex* c, byte* image, const byte* inside
 #define V_EXTENDED (V_RES + 2 * (abs(SHADOW_TILT_V) + SHADOW_DISTANCE))
 
     // Allocate memory
-    byte* mask_d, * inside_d, * outside_d, * image_d;
-    int* shadow_d;
+    byte *mask_d, *inside_d, *outside_d, *image_d;
+    int *shadow_d;
     cudaMalloc(&mask_d, V_EXTENDED * H_EXTENDED * sizeof(byte));
     cudaMalloc(&shadow_d, V_EXTENDED * H_EXTENDED * sizeof(int));
     cudaMalloc(&inside_d, 3 * V_RES * H_RES * sizeof(byte));
@@ -160,7 +160,7 @@ __host__ void generate_fractal(const complex* c, byte* image, const byte* inside
 #undef BLOCK_DIM
 }
 
-__global__ void __compute_mask(int h_max, int v_max, const complex c, byte* __restrict__ mask) {
+__global__ void __compute_mask(int h_max, int v_max, const complex c, byte *__restrict__ mask) {
 
     // Calculate index of the pixel
     int h = blockIdx.x * blockDim.x + threadIdx.x;
@@ -195,7 +195,7 @@ __global__ void __compute_mask(int h_max, int v_max, const complex c, byte* __re
     }
 }
 
-__global__ void __apply_shadow(int h_max, int v_max, __restrict__ const byte* mask, int* __restrict__ shadow) {
+__global__ void __apply_shadow(int h_max, int v_max, __restrict__ const byte *mask, int *__restrict__ shadow) {
 
     // Calculate index of the pixel
     int h = blockIdx.x * blockDim.x + threadIdx.x;
@@ -224,7 +224,7 @@ __global__ void __apply_shadow(int h_max, int v_max, __restrict__ const byte* ma
     }
 }
 
-__global__ void __assign_final(const int* __restrict__ shadow, const byte* __restrict__ mask, const byte* __restrict__ inside, const byte* __restrict__ outside, byte* __restrict__ image) {
+__global__ void __assign_final(const int *__restrict__ shadow, const byte *__restrict__ mask, const byte *__restrict__ inside, const byte *__restrict__ outside, byte *__restrict__ image) {
 
     // Calculate index of the pixel
     int h = blockIdx.x * blockDim.x + threadIdx.x;
@@ -259,22 +259,22 @@ __global__ void __assign_final(const int* __restrict__ shadow, const byte* __res
 #undef IN
 #undef OUT
 
-__host__ __device__ inline void cmul(complex* outcome, const complex* first, const complex* second) {
+__host__ __device__ inline void cmul(complex *outcome, const complex *first, const complex *second) {
     outcome->r = first->r * second->r - first->i * second->i;
     outcome->i = first->r * second->i + first->i * second->r;
 }
 
-__host__ __device__ inline void csum(complex* outcome, const complex* first, const complex* second) {
+__host__ __device__ inline void csum(complex *outcome, const complex *first, const complex *second) {
     outcome->r = first->r + second->r;
     outcome->i = first->i + second->i;
 }
 
-__host__ __device__ inline double cmod(const complex* z) {
+__host__ __device__ inline double cmod(const complex *z) {
     return sqrt(z->r * z->r + z->i * z->i);
 }
 
-int save_image(const char* filename, unsigned char* image) {
-    FILE* f = fopen(filename, "wb");
+int save_image(const char *filename, unsigned char *image) {
+    FILE *f = fopen(filename, "wb");
     if (f == NULL) return -1;
     fprintf(f, "P6\n%d %d\n%d\n", H_RES, V_RES, 255);
     fwrite(image, sizeof(unsigned char), H_RES * V_RES * 3, f);
@@ -282,8 +282,8 @@ int save_image(const char* filename, unsigned char* image) {
     return 0;
 }
 
-int load_image(const char* filename, unsigned char* image) {
-    FILE* f = fopen(filename, "rb");
+int load_image(const char *filename, unsigned char *image) {
+    FILE *f = fopen(filename, "rb");
     if (f == NULL) return -1;
     char temp1[4];
     int temp2, h, v;
