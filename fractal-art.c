@@ -8,9 +8,9 @@
 #define CENTER_X 0 // X coordinate for image center
 #define CENTER_Y 0 // Y coordinate for image center
 #define SCALE 2 // maximum X value in the fractal graph
-#define ITERATIONS (1 << 8) // number of iteration for checking divergence
+#define ITERATIONS (1 << 10) // number of iteration for checking divergence
 #define R (1 << 8) // ceiling upon which function is considered divergent
-#define SHADOW_DISTANCE 4 // radius of the circular shadow plot
+#define SHADOW_DISTANCE 16 // radius of the circular shadow plot
 #define SHADOW_SHARPNESS 1 // rapidity with which shadow gets dark
 #define SHADOW_TILT_H -64 // horizontal offset from where shadow is plotted
 #define SHADOW_TILT_V 32 // vertical offset from where shadow is plotted
@@ -102,9 +102,9 @@ void __apply_shadow(int h, int v, int h_max, int v_max, const byte *mask, int *s
 void __assign_final(int h, int v, const int *shadow, const byte *mask, const byte *inside, const byte *outside, byte *image);
 
 void generate_fractal(const complex *c, byte *image, const byte *inside, const byte *outside) {
-    // required vertical dimension due to shadow offset
+    // Required vertical dimension due to shadow offset
 #define H_EXTENDED (H_RES + 2 * (abs(SHADOW_TILT_H) + SHADOW_DISTANCE))
-    // required horizontal dimension due to shadow offset
+    // Required horizontal dimension due to shadow offset
 #define V_EXTENDED (V_RES + 2 * (abs(SHADOW_TILT_V) + SHADOW_DISTANCE))
 
     // Allocate memory for fractal mask and shadow
