@@ -11,7 +11,7 @@
 #define SCALE 2 // maximum X value in the fractal graph
 #define ITERATIONS (1 << 8) // number of iteration for checking divergence
 #define R (1 << 8) // ceiling upon which function is considered divergent
-#define SHADOW_DISTANCE 4 // radius of the circular shadow plot
+#define SHADOW_DISTANCE 16 // radius of the circular shadow plot
 #define SHADOW_SHARPNESS 1 // rapidity with which shadow gets dark
 #define SHADOW_TILT_H -64 // horizontal offset from where shadow is plotted
 #define SHADOW_TILT_V 32 // vertical offset from where shadow is plotted
