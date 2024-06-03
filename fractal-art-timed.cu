@@ -261,7 +261,9 @@ __global__ void __apply_shadow(
     if (mask[idx] == IN) return;
 
     // Plot a shadow circle
+#pragma unroll
     for (int i = -SHADOW_DISTANCE; i < SHADOW_DISTANCE; i++) {
+#pragma unroll
         for (int j = -SHADOW_DISTANCE; j < SHADOW_DISTANCE; j++) {
 
             // Calculate index of the offset shadow
