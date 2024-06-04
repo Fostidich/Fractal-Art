@@ -214,7 +214,7 @@ __global__ void __apply_shadow(int h_max, int v_max, __restrict__ const byte *ma
             int shadow_idx = (v + j + SHADOW_TILT_V) * h_max + h + i + SHADOW_TILT_H;
 
             // Check that the current shadow index is inside borders and radius
-            if (shadow_idx < 0 || shadow_idx >= h_max * v_max || mask[shadow_idx] == OUT ||
+            if (shadow_idx < 0 || shadow_idx >= h_max * v_max ||
                 sqrt(pow(idx % h_max - shadow_idx % h_max + SHADOW_TILT_H, 2) +
                     pow(idx / h_max - shadow_idx / h_max + SHADOW_TILT_V, 2)) > SHADOW_DISTANCE)
                 continue;
