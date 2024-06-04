@@ -25,7 +25,7 @@ typedef struct complex {
 } complex;
 
 /// Calculate fractal and shadow for each pixel point and assign images respectively
-__host__ void generate_fractal(const complex *c, byte *image, const byte *inside, const byte *outside);
+__host__ void generate_art(const complex *c, byte *image, const byte *inside, const byte *outside);
 
 /// Complex multiplication
 __device__ void cmul(complex *outcome, const complex *first, const complex *second);
@@ -72,7 +72,7 @@ int main(int argc, char **argv) {
     }
 
     // Compute fractal, shadow and image assignment
-    generate_fractal(&c, image, inside, outside);
+    generate_art(&c, image, inside, outside);
 
     // Save the output image
     if (save_image("fractal.ppm", image) < 0) {
@@ -89,13 +89,18 @@ int main(int argc, char **argv) {
 
 #define OUT 0xFF // outside color of the fractal mask
 #define IN 0x00 // inside color of the fractal mask
-#define BLOCK_DIM (2 * SHADOW_DISTANCE) // block dimensions for kernels
+#define H_EXTENSION (abs(SHADOW_TILT_H) + SHADOW_DISTANCE) // horizontal extension due to shadow offset
+#define V_EXTENSION (abs(SHADOW_TILT_V) + SHADOW_DISTANCE) // vertical extension due to shadow offset
+#define H_EXTENDED (H_RES + 2 * H_EXTENSION) // required vertical dimension due to shadow offset
+#define V_EXTENDED (V_RES + 2 * V_EXTENSION) // required horizontal dimension due to shadow offset
+#define MASK_COORDINATES(x, y) (y * H_EXTENDED + x) // linearized coordinates of mask
+#define SHADOW_COORDINATES(x, y) (y * H_EXTENDED + x) // linearized coordinates of shadow
+#define IMAGE_COORDINATES(x, y) (y * H_RES + x) // linearized coordinates of images
+#define BLOCK_DIM (2 * SHADOW_DISTANCE) // block dimension, that must be twice shadow distance
 
 /// The first iteration generates a black and white image (mask) where
 /// pixels inside the fractal are black and pixels outside are white.
 __global__ void __compute_mask(
-    const int h_max,
-    const int v_max,
     const complex c,
     byte *__restrict__ mask);
 
@@ -104,9 +109,9 @@ __global__ void __compute_mask(
 /// This is done by adding one to the corresponding elements of the shadow
 /// integer array (sized like fractal mask).
 /// The higher is the number, the higher is the shadow intensity.
+/// Block dimension must be equal to the diameter of the shadow.
 __global__ void __apply_shadow(
-    const int h_max,
-    const int v_max,
+    const int quadro,
     const byte *__restrict__ mask,
     int *__restrict__ shadow);
 
@@ -120,11 +125,7 @@ __global__ void __assign_final(
     const byte *__restrict__ outside,
     byte *__restrict__ image);
 
-__host__ void generate_fractal(const complex *c, byte *image, const byte *inside, const byte *outside) {
-    // Required vertical dimension due to shadow offset
-#define H_EXTENDED (H_RES + 2 * (abs(SHADOW_TILT_H) + SHADOW_DISTANCE))
-    // Required horizontal dimension due to shadow offset
-#define V_EXTENDED (V_RES + 2 * (abs(SHADOW_TILT_V) + SHADOW_DISTANCE))
+__host__ void generate_art(const complex *c, byte *image, const byte *inside, const byte *outside) {
 
     // Initialize events
     float time;
@@ -159,7 +160,7 @@ __host__ void generate_fractal(const complex *c, byte *image, const byte *inside
     // For each pixel compute fractal mask
     cudaEventRecord(start);
     grid_size = dim3(ceil(H_EXTENDED / block_size.x), ceil(V_EXTENDED / block_size.y));
-    __compute_mask << <grid_size, block_size >> > (H_EXTENDED, V_EXTENDED, *c, mask_d);
+    __compute_mask << <grid_size, block_size >> > (*c, mask_d);
     cudaEventRecord(stop);
     cudaDeviceSynchronize();
     cudaEventElapsedTime(&time, start, stop);
@@ -167,8 +168,13 @@ __host__ void generate_fractal(const complex *c, byte *image, const byte *inside
 
     // For each pixel compute shadow value
     cudaEventRecord(start);
-    grid_size = dim3(ceil(H_EXTENDED / block_size.x), ceil(V_EXTENDED / block_size.y));
-    __apply_shadow << <grid_size, block_size >> > (H_EXTENDED, V_EXTENDED, mask_d, shadow_d);
+    for (int i = 0; i < 4; i++) {
+        grid_size = dim3(
+            (ceil(H_EXTENDED / block_size.x) + i % 2) / 2,
+            (ceil(V_EXTENDED / block_size.y) + i / 2 % 2) / 2);
+        __apply_shadow << <grid_size, block_size >> > (i, mask_d, shadow_d);
+        cudaDeviceSynchronize();
+    }
     cudaEventRecord(stop);
     cudaDeviceSynchronize();
     cudaEventElapsedTime(&time, start, stop);
@@ -199,30 +205,24 @@ __host__ void generate_fractal(const complex *c, byte *image, const byte *inside
     // Destroy events
     cudaEventDestroy(start);
     cudaEventDestroy(stop);
-
-#undef H_EXTENDED
-#undef V_EXTENDED
 }
 
 __global__ void __compute_mask(
-    const int h_max,
-    const int v_max,
     const complex c,
     byte *__restrict__ mask) {
 
     // Calculate index of the pixel
     int h = blockIdx.x * blockDim.x + threadIdx.x;
     int v = blockIdx.y * blockDim.y + threadIdx.y;
-    if (h >= h_max || v >= v_max) return;
-    int idx = v * h_max + h;
+    if (h >= H_EXTENDED || v >= V_EXTENDED) return;
 
     // Calculate the side length of a pixel in the complex plane
     double res_unit = (double)SCALE / (H_RES / 2);
 
     // Calculate coordinates of the pixel in the complex plane
     complex z0, z1;
-    z0.r = res_unit * (h - h_max / 2) + CENTER_X;
-    z0.i = res_unit * (v - v_max / 2) + CENTER_Y;
+    z0.r = res_unit * (h - H_EXTENDED / 2) + CENTER_X;
+    z0.i = res_unit * (v - V_EXTENDED / 2) + CENTER_Y;
 
     // Iterate the function on itself to then analyze the convergence
     for (int i = 0; i < ITERATIONS; i++) {
@@ -237,37 +237,36 @@ __global__ void __compute_mask(
         if (cmod(&z0) > R) {
 
             // Assign outside value
-            mask[idx] = OUT;
+            mask[MASK_COORDINATES(h, v)] = OUT;
             return;
         }
     }
 }
 
 __global__ void __apply_shadow(
-    const int h_max,
-    const int v_max,
+    const int quadro,
     __restrict__ const byte *mask,
     int *__restrict__ shadow) {
 
     // Calculate index of the pixel
-    int h = blockIdx.x * blockDim.x + threadIdx.x;
-    int v = blockIdx.y * blockDim.y + threadIdx.y;
-    if (h >= h_max || v >= v_max) return;
-    int idx = v * h_max + h;
-    int tile_idx = threadIdx.y * blockIdx.x + threadIdx.x;
+    int h = (quadro % 2 + 2 * blockIdx.x) * blockDim.x + threadIdx.x;
+    int v = (quadro / 2 % 2 + 2 * blockIdx.y) * blockDim.y + threadIdx.y;
+    if (h >= H_EXTENDED || v >= V_EXTENDED) return;
+    int mask_idx = MASK_COORDINATES(h, v);
+    int mask_tile_idx = threadIdx.y * blockDim.x + threadIdx.x;
 
     // Allocate shared space
-    __shared__ int shadow_tile[4 * blockDim.y * blockDim.x];
-    __shared__ byte mask_tile[blockDim.y * blockDim.x];
-    cudaMemset(shadow_tile, 0, (blockDim.y + 2 * SHADOW_DISTANCE) * (blockDim.x + 2 * SHADOW_DISTANCE) * sizeof(byte));
+    __shared__ int shadow_tile[4 * BLOCK_DIM * BLOCK_DIM];
+    __shared__ byte mask_tile[BLOCK_DIM * BLOCK_DIM];
+    memset(shadow_tile, 0, 4 * blockDim.y * blockDim.x * sizeof(int));
 
     // Transfer mask block section to mask tile
-    mask_tile[tile_idx] = mask[idx];
+    mask_tile[mask_tile_idx] = mask[mask_idx];
 
     __syncthreads();
 
     // Ignore points in the image below
-    if (mask_tile[tile_idx] == IN) return;
+    if (mask_tile[mask_tile_idx] == IN) return;
 
     // Plot a shadow circle
 #pragma unroll
@@ -276,27 +275,36 @@ __global__ void __apply_shadow(
         for (int j = 0; j < 2 * SHADOW_DISTANCE; j++) {
 
             // Calculate index of the offset shadow
-            int shadow_idx = (threadIdx.y + j) * h_max + threadIdx.x + i;
+            int shadow_tile_idx = mask_tile_idx + (threadIdx.y + j) * blockDim.y + threadIdx.x + i;
 
             // Check that the current shadow index is inside borders and radius
-            if (mask_tile[shadow_idx] == OUT ||
+            if (mask_tile[shadow_tile_idx] == OUT ||
                 sqrt(pow(i, 2) + pow(i, 2)) > SHADOW_DISTANCE) {
                 __syncthreads();
                 continue;
             }
 
             __syncthreads();
-            shadow_tile[shadow_idx]++;
+            shadow_tile[shadow_tile_idx]++;
         }
     }
 
     __syncthreads();
 
     // Transfer shadow tile to shadow block section
-    shadow[idx - h_max * blockDim.y / 2 - blockDim.x / 2] = shadow_tile[tile_idx];
-    shadow[idx - h_max * blockDim.y / 2 + blockDim.x / 2] = shadow_tile[tile_idx + blockDim.x];
-    shadow[idx + h_max * blockDim.y / 2 - blockDim.x / 2] = shadow_tile[tile_idx + 2 * blockDim.y * blockDim.x];
-    shadow[idx + h_max * blockDim.y / 2 + blockDim.x / 2] = shadow_tile[tile_idx + 2 * blockDim.y * blockDim.x + blockDim.x];
+    int shadow_idx;
+    shadow_idx = mask_idx - H_EXTENDED * blockDim.y / 2 - blockDim.x / 2;
+    if (shadow_idx >= 0 && shadow_idx < H_EXTENDED * V_EXTENDED)
+        shadow[shadow_idx] = shadow_tile[mask_tile_idx];
+    shadow_idx = mask_idx - H_EXTENDED * blockDim.y / 2 + blockDim.x / 2;
+    if (shadow_idx >= 0 && shadow_idx < H_EXTENDED * V_EXTENDED)
+        shadow[shadow_idx] = shadow_tile[mask_tile_idx + blockDim.x];
+    shadow_idx = mask_idx + H_EXTENDED * blockDim.y / 2 - blockDim.x / 2;
+    if (shadow_idx >= 0 && shadow_idx < H_EXTENDED * V_EXTENDED)
+        shadow[shadow_idx] = shadow_tile[mask_tile_idx + 2 * blockDim.y * blockDim.x];
+    shadow_idx = mask_idx + H_EXTENDED * blockDim.y / 2 + blockDim.x / 2;
+    if (shadow_idx >= 0 && shadow_idx < H_EXTENDED * V_EXTENDED)
+        shadow[shadow_idx] = shadow_tile[mask_tile_idx + 2 * blockDim.y * blockDim.x + blockDim.x];
 }
 
 __global__ void __assign_final(
@@ -310,12 +318,9 @@ __global__ void __assign_final(
     int h = blockIdx.x * blockDim.x + threadIdx.x;
     int v = blockIdx.y * blockDim.y + threadIdx.y;
     if (h >= H_RES || v >= V_RES) return;
-    int idx = v * H_RES + h;
-    int idx_framed = (abs(SHADOW_TILT_V) + SHADOW_DISTANCE + v) *
-        (H_RES + 2 * (abs(SHADOW_TILT_H) + SHADOW_DISTANCE)) +
-        abs(SHADOW_TILT_H) + SHADOW_DISTANCE + h;
+    int idx = IMAGE_COORDINATES(h, v);
 
-    if (mask[idx_framed] == OUT) {
+    if (mask[MASK_COORDINATES(H_EXTENSION + h, V_EXTENSION + v)] == OUT) {
 
         // Outside image assignment
         image[3 * idx + 0] = outside[3 * idx + 0];
@@ -325,9 +330,9 @@ __global__ void __assign_final(
     } else {
 
         // Shadow intensity computation
-        float toner = (exp(-SHADOW_SHARPNESS * shadow[idx_framed] /
-            (3.1416 * SHADOW_DISTANCE * SHADOW_DISTANCE))) *
-            SHADOW_INTENSITY + (1 - SHADOW_INTENSITY);
+        float toner = (exp(-SHADOW_SHARPNESS *
+            shadow[SHADOW_COORDINATES(H_EXTENSION + h + SHADOW_TILT_H, V_EXTENSION + v + SHADOW_TILT_V)] /
+            (3.1416 * SHADOW_DISTANCE * SHADOW_DISTANCE))) * SHADOW_INTENSITY + (1 - SHADOW_INTENSITY);
 
         // Inside image assignment with shadow
         image[3 * idx + 0] = inside[3 * idx + 0] * toner;
@@ -335,10 +340,6 @@ __global__ void __assign_final(
         image[3 * idx + 2] = inside[3 * idx + 2] * toner;
     }
 }
-
-#undef IN
-#undef OUT
-#undef BLOCK_DIM
 
 __device__ inline void cmul(complex *outcome, const complex *first, const complex *second) {
     outcome->r = first->r * second->r - first->i * second->i;
