@@ -238,7 +238,7 @@ __global__ void __compute_mask(
 }
 
 __global__ void __apply_shadow(
-    __restrict__ const byte *mask,
+    const byte *__restrict__ mask,
     int *__restrict__ shadow) {
 
     // Calculate index of the pixel
@@ -246,12 +246,15 @@ __global__ void __apply_shadow(
     int v = blockIdx.y * blockDim.y + threadIdx.y;
     if (h >= H_EXTENDED || v >= V_EXTENDED) return;
     int idx = MASK_COORDINATES(h, v);
-    int mask_tile_idx = threadIdx.y * blockDim.x + threadIdx.x;
+    int mask_tile_idx = threadIdx.y * BLOCK_DIM + threadIdx.x;
 
     // Allocate shared space
     __shared__ int shadow_tile[4 * BLOCK_DIM * BLOCK_DIM];
     __shared__ byte mask_tile[BLOCK_DIM * BLOCK_DIM];
-    memset(shadow_tile, 0, 4 * blockDim.y * blockDim.x * sizeof(int));
+    shadow_tile[threadIdx.y * 2 * BLOCK_DIM + threadIdx.x] = 0;
+    shadow_tile[threadIdx.y * 2 * BLOCK_DIM + threadIdx.x + BLOCK_DIM] = 0;
+    shadow_tile[(threadIdx.y + BLOCK_DIM) * 2 * BLOCK_DIM + threadIdx.x] = 0;
+    shadow_tile[(threadIdx.y + BLOCK_DIM) * 2 * BLOCK_DIM + threadIdx.x + BLOCK_DIM] = 0;
 
     // Transfer mask block section to mask tile
     mask_tile[mask_tile_idx] = mask[idx];
@@ -262,9 +265,7 @@ __global__ void __apply_shadow(
     if (mask_tile[mask_tile_idx] == IN) return;
 
     // Plot a shadow circle
-#pragma unroll
     for (int i = 0; i < 2 * SHADOW_DISTANCE; i++) {
-#pragma unroll
         for (int j = 0; j < 2 * SHADOW_DISTANCE; j++) {
             __syncthreads();
 
@@ -284,6 +285,7 @@ __global__ void __apply_shadow(
     // Transfer shadow tile to shadow block section
     shadow[idx] = shadow_tile[(threadIdx.y + BLOCK_DIM / 2) * 2 * blockDim.x + threadIdx.x + BLOCK_DIM / 2];
 
+    // TODO add all really
     // int shadow_idx;
     // shadow_idx = mask_idx - H_EXTENDED * blockDim.y / 2 - blockDim.x / 2;
     // if (shadow_idx >= 0 && shadow_idx < H_EXTENDED * V_EXTENDED)
