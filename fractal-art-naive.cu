@@ -173,6 +173,28 @@ __host__ void generate_art(const complex *c, byte *image, const byte *inside, co
     cudaEventElapsedTime(&time, start, stop);
     printf("Shadow application: %f\n", time);
 
+/*    // TODO remove following
+    int *shadow_h = (int *)malloc(H_EXTENDED * V_EXTENDED * sizeof(int));
+    cudaMemcpy(shadow_h, shadow_d, H_EXTENDED * V_EXTENDED * sizeof(int), cudaMemcpyDeviceToHost);
+    for (int i = 0; i < H_RES; i++) {
+        for (int j = 0; j < V_RES; j++) {
+            int img_idx = IMAGE_COORDINATES(i, j);
+            int sdw_idx = SHADOW_COORDINATES(H_EXTENSION + i, V_EXTENSION + j);
+            byte sdw_val = (1.0f - (float)shadow_h[sdw_idx] / 1024.0f) * 0xFF;
+            image[3 * img_idx + 0] = sdw_val;
+            image[3 * img_idx + 1] = sdw_val;
+            image[3 * img_idx + 2] = sdw_val;
+        }
+    }
+    cudaFree(mask_d);
+    cudaFree(shadow_d);
+    cudaFree(inside_d);
+    cudaFree(outside_d);
+    cudaFree(image_d);
+    cudaEventDestroy(start);
+    cudaEventDestroy(stop);
+    return;*/
+
     // For each pixel select final image, computing its shadow
     cudaEventRecord(start);
     grid_size = dim3(ceil(H_RES / block_size.x), ceil(V_RES / block_size.y));
@@ -251,17 +273,15 @@ __global__ void __apply_shadow(
     // Plot a shadow circle
     for (int i = -SHADOW_DISTANCE; i < SHADOW_DISTANCE; i++) {
         for (int j = -SHADOW_DISTANCE; j < SHADOW_DISTANCE; j++) {
-            __syncthreads();
-
-            // Calculate index of the offset shadow
-            int shadow_idx = SHADOW_COORDINATES(h + i, v + j);
 
             // Check that the current shadow index is inside borders and radius
-            if (shadow_idx < 0 || shadow_idx >= V_EXTENDED * H_EXTENDED ||
-                sqrt(pow(i, 2) + pow(j, 2)) > SHADOW_DISTANCE)
+            if (h + i >= H_EXTENDED || h + i < 0 ||
+                v + j >= V_EXTENDED || v + j < 0 ||
+                sqrt((double)(i * i + j * j)) > SHADOW_DISTANCE)
                 continue;
 
-            atomicAdd(&shadow[shadow_idx], 1);
+            // atomicAdd(&shadow[SHADOW_COORDINATES(h + i, v + j)], 1);
+            shadow[SHADOW_COORDINATES(h, v)] = 127;
         }
     }
 }
