@@ -247,6 +247,7 @@ __global__ void __apply_shadow(
     if (h >= H_EXTENDED || v >= V_EXTENDED) return;
 
     // Allocate shared space
+    // TODO use cudamalloc to avoid segmentation fault (?)
     __shared__ int shadow_tile[4 * BLOCK_DIM * BLOCK_DIM];
     __shared__ byte mask_tile[BLOCK_DIM * BLOCK_DIM];
     shadow_tile[threadIdx.y * 2 * BLOCK_DIM + threadIdx.x] = 0;

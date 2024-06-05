@@ -96,7 +96,7 @@ int main(int argc, char **argv) {
 #define MASK_COORDINATES(x, y) (y * H_EXTENDED + x) // linearized coordinates of mask
 #define SHADOW_COORDINATES(x, y) (y * H_EXTENDED + x) // linearized coordinates of shadow
 #define IMAGE_COORDINATES(x, y) (y * H_RES + x) // linearized coordinates of images
-#define BLOCK_DIM (2 * SHADOW_DISTANCE) // block dimension, that must be twice shadow distance
+#define BLOCK_DIM 32 // threads per block dimension
 
 /// The first iteration generates a black and white image (mask) where
 /// pixels inside the fractal are black and pixels outside are white.
@@ -157,7 +157,9 @@ __host__ void generate_art(const complex *c, byte *image, const byte *inside, co
 
     // For each pixel compute fractal mask
     cudaEventRecord(start);
-    grid_size = dim3(ceil(H_EXTENDED / block_size.x), ceil(V_EXTENDED / block_size.y));
+    grid_size = dim3(
+        ceil((float)H_EXTENDED / block_size.x),
+        ceil((float)V_EXTENDED / block_size.y));
     __compute_mask << <grid_size, block_size >> > (*c, mask_d);
     cudaEventRecord(stop);
     cudaDeviceSynchronize();
@@ -166,38 +168,20 @@ __host__ void generate_art(const complex *c, byte *image, const byte *inside, co
 
     // For each pixel compute shadow value
     cudaEventRecord(start);
-    grid_size = dim3(ceil(H_EXTENDED / block_size.x), ceil(V_EXTENDED / block_size.y));
+    grid_size = dim3(
+        ceil((float)H_EXTENDED / block_size.x),
+        ceil((float)V_EXTENDED / block_size.y));
     __apply_shadow << <grid_size, block_size >> > (mask_d, shadow_d);
     cudaEventRecord(stop);
     cudaDeviceSynchronize();
     cudaEventElapsedTime(&time, start, stop);
     printf("Shadow application: %f\n", time);
 
-/*    // TODO remove following
-    int *shadow_h = (int *)malloc(H_EXTENDED * V_EXTENDED * sizeof(int));
-    cudaMemcpy(shadow_h, shadow_d, H_EXTENDED * V_EXTENDED * sizeof(int), cudaMemcpyDeviceToHost);
-    for (int i = 0; i < H_RES; i++) {
-        for (int j = 0; j < V_RES; j++) {
-            int img_idx = IMAGE_COORDINATES(i, j);
-            int sdw_idx = SHADOW_COORDINATES(H_EXTENSION + i, V_EXTENSION + j);
-            byte sdw_val = (1.0f - (float)shadow_h[sdw_idx] / 1024.0f) * 0xFF;
-            image[3 * img_idx + 0] = sdw_val;
-            image[3 * img_idx + 1] = sdw_val;
-            image[3 * img_idx + 2] = sdw_val;
-        }
-    }
-    cudaFree(mask_d);
-    cudaFree(shadow_d);
-    cudaFree(inside_d);
-    cudaFree(outside_d);
-    cudaFree(image_d);
-    cudaEventDestroy(start);
-    cudaEventDestroy(stop);
-    return;*/
-
     // For each pixel select final image, computing its shadow
     cudaEventRecord(start);
-    grid_size = dim3(ceil(H_RES / block_size.x), ceil(V_RES / block_size.y));
+    grid_size = dim3(
+        ceil((float)H_RES / block_size.x),
+        ceil((float)V_RES / block_size.y));
     __assign_final << <grid_size, block_size >> > (shadow_d, mask_d, inside_d, outside_d, image_d);
     cudaEventRecord(stop);
     cudaDeviceSynchronize();
@@ -277,11 +261,10 @@ __global__ void __apply_shadow(
             // Check that the current shadow index is inside borders and radius
             if (h + i >= H_EXTENDED || h + i < 0 ||
                 v + j >= V_EXTENDED || v + j < 0 ||
-                sqrt((double)(i * i + j * j)) > SHADOW_DISTANCE)
+                sqrt((float)(i * i + j * j)) > SHADOW_DISTANCE)
                 continue;
 
-            // atomicAdd(&shadow[SHADOW_COORDINATES(h + i, v + j)], 1);
-            shadow[SHADOW_COORDINATES(h, v)] = 127;
+            atomicAdd(&shadow[SHADOW_COORDINATES(h + i, v + j)], 1);
         }
     }
 }
