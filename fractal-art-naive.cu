@@ -24,12 +24,13 @@ typedef struct complex {
     double i;
 } complex;
 
-#define CHECK_KERNELCALL { \
-    const cudaError_t err = cudaGetLastError(); \
-    if (err != cudaSuccess) { \
-        printf("%s in %s at line %d\n", cudaGetErrorString(err), __FILE__, __LINE__); \
-        exit(EXIT_FAILURE); \
-    } \
+#define CHECK_KERNELCALL {                                  \
+    const cudaError_t err = cudaGetLastError();             \
+    if (err != cudaSuccess) {                               \
+        printf("ERROR: %s::%d\n -> %s\n",                   \
+            __FILE__, __LINE__, cudaGetErrorString(err));   \
+        exit(EXIT_FAILURE);                                 \
+    }                                                       \
 }
 
 /// Calculate fractal and shadow for each pixel point and assign images respectively
@@ -101,9 +102,9 @@ int main(int argc, char **argv) {
 #define V_EXTENSION (abs(SHADOW_TILT_V) + SHADOW_DISTANCE) // vertical extension due to shadow offset
 #define H_EXTENDED (H_RES + 2 * H_EXTENSION) // required vertical dimension due to shadow offset
 #define V_EXTENDED (V_RES + 2 * V_EXTENSION) // required horizontal dimension due to shadow offset
-#define MASK_COORDINATES(x, y) (y * H_EXTENDED + x) // linearized coordinates of mask
-#define SHADOW_COORDINATES(x, y) (y * H_EXTENDED + x) // linearized coordinates of shadow
-#define IMAGE_COORDINATES(x, y) (y * H_RES + x) // linearized coordinates of images
+#define MASK_COORDINATES(x, y) ((y) * H_EXTENDED + (x)) // linearized coordinates of mask
+#define SHADOW_COORDINATES(x, y) ((y) * H_EXTENDED + (x)) // linearized coordinates of shadow
+#define IMAGE_COORDINATES(x, y) ((y) * H_RES + (x)) // linearized coordinates of images
 #define BLOCK_DIM 32 // threads per block dimension
 
 /// The first iteration generates a black and white image (mask) where
@@ -171,7 +172,8 @@ __host__ void generate_art(const complex *c, byte *image, const byte *inside, co
     __compute_mask << <grid_size, block_size >> > (*c, mask_d);
     cudaEventRecord(stop);
     cudaDeviceSynchronize();
-    cudaEventElapsedTime(&time, start, stop);
+    CHECK_KERNELCALL
+        cudaEventElapsedTime(&time, start, stop);
     printf("Mask computation: %f\n", time);
 
     // For each pixel compute shadow value
@@ -180,10 +182,10 @@ __host__ void generate_art(const complex *c, byte *image, const byte *inside, co
         ceil((float)H_EXTENDED / block_size.x),
         ceil((float)V_EXTENDED / block_size.y));
     __apply_shadow << <grid_size, block_size >> > (mask_d, shadow_d);
-    CHECK_KERNELCALL
     cudaEventRecord(stop);
     cudaDeviceSynchronize();
-    cudaEventElapsedTime(&time, start, stop);
+    CHECK_KERNELCALL
+        cudaEventElapsedTime(&time, start, stop);
     printf("Shadow application: %f\n", time);
 
     // For each pixel select final image, computing its shadow
@@ -194,7 +196,8 @@ __host__ void generate_art(const complex *c, byte *image, const byte *inside, co
     __assign_final << <grid_size, block_size >> > (shadow_d, mask_d, inside_d, outside_d, image_d);
     cudaEventRecord(stop);
     cudaDeviceSynchronize();
-    cudaEventElapsedTime(&time, start, stop);
+    CHECK_KERNELCALL
+        cudaEventElapsedTime(&time, start, stop);
     printf("Final assignment: %f\n", time);
 
     // Data transfer to host
@@ -270,7 +273,7 @@ __global__ void __apply_shadow(
             // Check that the current shadow index is inside borders and radius
             if (h + i >= H_EXTENDED || h + i < 0 ||
                 v + j >= V_EXTENDED || v + j < 0 ||
-                sqrt((float)(i * i + j * j)) > SHADOW_DISTANCE)
+                i * i + j * j > SHADOW_DISTANCE * SHADOW_DISTANCE)
                 continue;
 
             atomicAdd(&shadow[SHADOW_COORDINATES(h + i, v + j)], 1);
