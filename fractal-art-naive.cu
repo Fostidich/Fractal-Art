@@ -24,6 +24,14 @@ typedef struct complex {
     double i;
 } complex;
 
+#define CHECK_KERNELCALL { \
+    const cudaError_t err = cudaGetLastError(); \
+    if (err != cudaSuccess) { \
+        printf("%s in %s at line %d\n", cudaGetErrorString(err), __FILE__, __LINE__); \
+        exit(EXIT_FAILURE); \
+    } \
+}
+
 /// Calculate fractal and shadow for each pixel point and assign images respectively
 __host__ void generate_art(const complex *c, byte *image, const byte *inside, const byte *outside);
 
@@ -172,6 +180,7 @@ __host__ void generate_art(const complex *c, byte *image, const byte *inside, co
         ceil((float)H_EXTENDED / block_size.x),
         ceil((float)V_EXTENDED / block_size.y));
     __apply_shadow << <grid_size, block_size >> > (mask_d, shadow_d);
+    CHECK_KERNELCALL
     cudaEventRecord(stop);
     cudaDeviceSynchronize();
     cudaEventElapsedTime(&time, start, stop);
