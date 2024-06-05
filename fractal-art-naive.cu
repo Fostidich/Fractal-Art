@@ -24,6 +24,7 @@ typedef struct complex {
     double i;
 } complex;
 
+/// Check the last kernel call for errors
 #define CHECK_KERNELCALL {                                  \
     const cudaError_t err = cudaGetLastError();             \
     if (err != cudaSuccess) {                               \
@@ -51,7 +52,7 @@ int save_image(const char *filename, unsigned char *image);
 /// Load ppm image from disk
 int load_image(const char *filename, unsigned char *image);
 
-/// Measure milliseconds
+/// Measure milliseconds on host
 double milliseconds();
 
 int main(int argc, char **argv) {
@@ -65,7 +66,7 @@ int main(int argc, char **argv) {
     c.r = strtod(argv[1], NULL);
     c.i = strtod(argv[2], NULL);
 
-    // Allocate memory for input and output images
+    // Allocate memory for images
     byte *image = (byte *)malloc(3 * V_RES * H_RES * sizeof(byte));
     byte *inside = (byte *)malloc(3 * V_RES * H_RES * sizeof(byte));
     byte *outside = (byte *)malloc(3 * V_RES * H_RES * sizeof(byte));
@@ -108,12 +109,13 @@ int main(int argc, char **argv) {
 #define BLOCK_DIM 32 // threads per block dimension
 
 /// The first iteration generates a black and white image (mask) where
-/// pixels inside the fractal are black and pixels outside are white.
+/// pixels inside (divergent) the fractal are black and pixels outside
+/// (convergent) are white.
 __global__ void __compute_mask(
     const complex c,
     byte *__restrict__ mask);
 
-/// The second iteration plots a circular shadow for each white pixel of
+/// The second iteration plots a circular shadow for each outside pixel of
 /// the just generated fractal mask.
 /// This is done by adding one to the corresponding elements of the shadow
 /// integer array (sized like fractal mask).
@@ -222,7 +224,7 @@ __global__ void __compute_mask(
     const complex c,
     byte *__restrict__ mask) {
 
-    // Calculate index of the pixel
+    // Calculate coordinates of the pixel
     int h = blockIdx.x * blockDim.x + threadIdx.x;
     int v = blockIdx.y * blockDim.y + threadIdx.y;
     if (h >= H_EXTENDED || v >= V_EXTENDED) return;
@@ -258,7 +260,7 @@ __global__ void __apply_shadow(
     const byte *__restrict__ mask,
     int *__restrict__ shadow) {
 
-    // Calculate index of the pixel
+    // Calculate coordinates of the pixel
     int h = blockIdx.x * blockDim.x + threadIdx.x;
     int v = blockIdx.y * blockDim.y + threadIdx.y;
     if (h >= H_EXTENDED || v >= V_EXTENDED) return;
@@ -266,7 +268,7 @@ __global__ void __apply_shadow(
     // Ignore points in the image below
     if (mask[MASK_COORDINATES(h, v)] == IN) return;
 
-    // Plot a shadow circle
+    // Plot a circular shadow
     for (int i = -SHADOW_DISTANCE; i < SHADOW_DISTANCE; i++) {
         for (int j = -SHADOW_DISTANCE; j < SHADOW_DISTANCE; j++) {
 
@@ -276,6 +278,7 @@ __global__ void __apply_shadow(
                 i * i + j * j > SHADOW_DISTANCE * SHADOW_DISTANCE)
                 continue;
 
+            // Increment shadow value of pixel
             atomicAdd(&shadow[SHADOW_COORDINATES(h + i, v + j)], 1);
         }
     }
@@ -288,10 +291,12 @@ __global__ void __assign_final(
     const byte *__restrict__ outside,
     byte *__restrict__ image) {
 
-    // Calculate index of the pixel
+    // Calculate coordinates of the pixel
     int h = blockIdx.x * blockDim.x + threadIdx.x;
     int v = blockIdx.y * blockDim.y + threadIdx.y;
     if (h >= H_RES || v >= V_RES) return;
+
+    // Calculate index of the pixel
     int image_idx = IMAGE_COORDINATES(h, v);
 
     if (mask[MASK_COORDINATES(H_EXTENSION + h, V_EXTENSION + v)] == OUT) {
