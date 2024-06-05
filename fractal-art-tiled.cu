@@ -245,8 +245,6 @@ __global__ void __apply_shadow(
     int h = blockIdx.x * blockDim.x + threadIdx.x;
     int v = blockIdx.y * blockDim.y + threadIdx.y;
     if (h >= H_EXTENDED || v >= V_EXTENDED) return;
-    int idx = MASK_COORDINATES(h, v);
-    int mask_tile_idx = threadIdx.y * BLOCK_DIM + threadIdx.x;
 
     // Allocate shared space
     __shared__ int shadow_tile[4 * BLOCK_DIM * BLOCK_DIM];
@@ -257,6 +255,8 @@ __global__ void __apply_shadow(
     shadow_tile[(threadIdx.y + BLOCK_DIM) * 2 * BLOCK_DIM + threadIdx.x + BLOCK_DIM] = 0;
 
     // Transfer mask block section to mask tile
+    int idx = MASK_COORDINATES(h, v);
+    int mask_tile_idx = threadIdx.y * BLOCK_DIM + threadIdx.x;
     mask_tile[mask_tile_idx] = mask[idx];
 
     __syncthreads();
@@ -265,12 +265,12 @@ __global__ void __apply_shadow(
     if (mask_tile[mask_tile_idx] == IN) return;
 
     // Plot a shadow circle
-    for (int i = 0; i < 2 * SHADOW_DISTANCE; i++) {
-        for (int j = 0; j < 2 * SHADOW_DISTANCE; j++) {
+    for (int i = -SHADOW_DISTANCE; i < SHADOW_DISTANCE; i++) {
+        for (int j = -SHADOW_DISTANCE; j < SHADOW_DISTANCE; j++) {
             __syncthreads();
 
             // Calculate index of the offset shadow
-            int shadow_tile_idx = (threadIdx.y + j + BLOCK_DIM / 2) * 2 * blockDim.x + threadIdx.x + i + BLOCK_DIM / 2;
+            int shadow_tile_idx = (threadIdx.y + j + BLOCK_DIM / 2) * 2 * BLOCK_DIM + threadIdx.x + i + BLOCK_DIM / 2;
 
             // Check that the current shadow index is inside borders and radius
             if (sqrt(pow(i, 2) + pow(i, 2)) > SHADOW_DISTANCE)
@@ -325,8 +325,11 @@ __global__ void __assign_final(
 
         // Shadow intensity computation
         float toner = (exp(-SHADOW_SHARPNESS *
-            shadow[SHADOW_COORDINATES(H_EXTENSION + h + SHADOW_TILT_H, V_EXTENSION + v + SHADOW_TILT_V)] /
-            (3.1416 * SHADOW_DISTANCE * SHADOW_DISTANCE))) * SHADOW_INTENSITY + (1 - SHADOW_INTENSITY);
+            shadow[SHADOW_COORDINATES(
+                H_EXTENSION + h + SHADOW_TILT_H,
+                V_EXTENSION + v + SHADOW_TILT_V)] /
+            (3.1416 * SHADOW_DISTANCE * SHADOW_DISTANCE))) *
+            SHADOW_INTENSITY + (1 - SHADOW_INTENSITY);
 
         // Inside image assignment with shadow
         image[3 * idx + 0] = inside[3 * idx + 0] * toner;
