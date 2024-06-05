@@ -12,11 +12,12 @@
 #define SCALE 2 // maximum X value in the fractal graph
 #define ITERATIONS (1 << 8) // number of iteration for checking divergence
 #define R (1 << 8) // ceiling upon which function is considered divergent
-#define SHADOW_DISTANCE 16 // radius of the circular shadow plot
+#define SHADOW_DISTANCE 64 // radius of the circular shadow plot
 #define SHADOW_SHARPNESS 1 // rapidity with which shadow gets dark
 #define SHADOW_TILT_H -64 // horizontal offset from where shadow is plotted
 #define SHADOW_TILT_V 32 // vertical offset from where shadow is plotted
 #define SHADOW_INTENSITY 0.8 // blackness of the shadow
+#define BLOCK_DIM 32 // threads per block dimension
 
 typedef unsigned char byte;
 typedef struct complex {
@@ -106,7 +107,6 @@ int main(int argc, char **argv) {
 #define MASK_COORDINATES(x, y) ((y) * H_EXTENDED + (x)) // linearized coordinates of mask
 #define SHADOW_COORDINATES(x, y) ((y) * H_EXTENDED + (x)) // linearized coordinates of shadow
 #define IMAGE_COORDINATES(x, y) ((y) * H_RES + (x)) // linearized coordinates of images
-#define BLOCK_DIM 32 // threads per block dimension
 
 /// The first iteration generates a black and white image (mask) where
 /// pixels inside (divergent) the fractal are black and pixels outside
@@ -267,7 +267,7 @@ __global__ void __apply_shadow(
     if (h >= H_EXTENDED || v >= V_EXTENDED) return;
 
     // Allocate and intialize shared space
-    __shared__ int shadow_tile[SHADOW_TILE_DIM][SHADOW_TILE_DIM];
+    __shared__ unsigned short shadow_tile[SHADOW_TILE_DIM][SHADOW_TILE_DIM];
     for (int i = threadIdx.x; i < SHADOW_TILE_DIM; i += BLOCK_DIM) // FIXME try inverting x and y
         for (int j = threadIdx.y; j < SHADOW_TILE_DIM; j += BLOCK_DIM)
             shadow_tile[i][j] = 0;
