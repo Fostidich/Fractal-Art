@@ -260,51 +260,50 @@ __global__ void __apply_shadow(
     const byte *__restrict__ mask,
     int *__restrict__ shadow) {
 #define SHADOW_TILE_DIM (BLOCK_DIM + 2 * SHADOW_DISTANCE) // shared shadow matrix side length
+#define SECTION (SHADOW_TILE_DIM / BLOCK_DIM) // shared pixel per thread dimension
 
     // Calculate coordinates of the pixel
     int h = blockIdx.x * blockDim.x + threadIdx.x;
     int v = blockIdx.y * blockDim.y + threadIdx.y;
-    if (h >= H_EXTENDED || v >= V_EXTENDED) return;
 
     // Allocate and intialize shared space
     __shared__ unsigned short shadow_tile[SHADOW_TILE_DIM][SHADOW_TILE_DIM];
-    for (int i = threadIdx.x; i < SHADOW_TILE_DIM; i += BLOCK_DIM) // FIXME try inverting x and y
-        for (int j = threadIdx.y; j < SHADOW_TILE_DIM; j += BLOCK_DIM)
-            shadow_tile[i][j] = 0;
+    for (int i = threadIdx.x * SECTION; i < (threadIdx.x + 1) * SECTION; i++)
+        for (int j = threadIdx.y * SECTION; j < (threadIdx.y + 1) * SECTION; j++)
+            if (i < SHADOW_TILE_DIM && j < SHADOW_TILE_DIM)
+                shadow_tile[i][j] = 0;
 
     __syncthreads();
 
-    // Ignore points in the image below
-    if (mask[MASK_COORDINATES(h, v)] == IN) return; // FIXME maybe we get problems with the following syncs
+    // Check boundaries and ignore points in the image below
+    if (h < H_EXTENDED && v < V_EXTENDED && mask[MASK_COORDINATES(h, v)] == OUT) {
 
-    // Plot a circular shadow
-    for (int i = -SHADOW_DISTANCE; i <= SHADOW_DISTANCE; i++) {
-        for (int j = -SHADOW_DISTANCE; j <= SHADOW_DISTANCE; j++) {
-            __syncthreads();
+        // Plot a circular shadow
+        for (int i = -SHADOW_DISTANCE; i <= SHADOW_DISTANCE; i++) {
+            for (int j = -SHADOW_DISTANCE; j <= SHADOW_DISTANCE; j++) {
+                // FIXME __syncthreads();
 
-            // Check that the current shadow index is inside borders and radius
-            if (h + i >= H_EXTENDED || h + i < 0 ||
-                v + j >= V_EXTENDED || v + j < 0 ||
-                i * i + j * j > SHADOW_DISTANCE * SHADOW_DISTANCE)
-                continue;
-
-            // Increment shadow value of pixel
-            shadow_tile[SHADOW_DISTANCE + threadIdx.x + i][SHADOW_DISTANCE + threadIdx.y + j]++;
+                // Increment shadow value if the current shadow index is inside borders and radius
+                if (h + i < H_EXTENDED && h + i >= 0 && v + j < V_EXTENDED && v + j >= 0 &&
+                    i * i + j * j < SHADOW_DISTANCE * SHADOW_DISTANCE)
+                    shadow_tile[SHADOW_DISTANCE + threadIdx.x + i][SHADOW_DISTANCE + threadIdx.y + j]++;
+            }
         }
     }
 
     __syncthreads();
 
     // Update global memory with shadow values
-    for (int i = threadIdx.x; i < SHADOW_TILE_DIM; i += BLOCK_DIM) // FIXME try inverting x and y
-        for (int j = threadIdx.y; j < SHADOW_TILE_DIM; j += BLOCK_DIM) {
-            if (h - SHADOW_DISTANCE + i < 0 || h - SHADOW_DISTANCE + i >= H_EXTENDED ||
-                v - SHADOW_DISTANCE + j < 0 || v - SHADOW_DISTANCE + j >= V_EXTENDED)
-                continue;
+    for (int i = threadIdx.x * SECTION; i < (threadIdx.x + 1) * SECTION; i++)
+        for (int j = threadIdx.y * SECTION; j < (threadIdx.y + 1) * SECTION; j++)
+            if (i < SHADOW_TILE_DIM && j < SHADOW_TILE_DIM) {
+                int x = h - SHADOW_DISTANCE + i;
+                int y = v - SHADOW_DISTANCE + j;
+                if (x >= 0 && x < H_EXTENDED && y >= 0 && y < V_EXTENDED)
+                    atomicAdd(&shadow[SHADOW_COORDINATES(x, y)], shadow_tile[i][j]);
+            }
 
-            atomicAdd(&shadow[SHADOW_COORDINATES(h - SHADOW_DISTANCE + i, v - SHADOW_DISTANCE + j)], shadow_tile[i][j]);
-        }
-
+#undef SECTION
 #undef SHADOW_TILE_DIM
 }
 
