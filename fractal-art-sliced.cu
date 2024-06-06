@@ -107,6 +107,7 @@ int main(int argc, char **argv) {
 #define MASK_COORDINATES(x, y) ((y) * H_EXTENDED + (x)) // linearized coordinates of mask
 #define SHADOW_COORDINATES(x, y) ((y) * H_EXTENDED + (x)) // linearized coordinates of shadow
 #define IMAGE_COORDINATES(x, y) ((y) * H_RES + (x)) // linearized coordinates of images
+#define SLICES (2 * ceil((float)SHADOW_DISTANCE / BLOCK_DIM) + 1) // number of slices needed to avoid memory collisions
 
 /// The first iteration generates a black and white image (mask) where
 /// pixels inside (divergent) the fractal are black and pixels outside
@@ -121,6 +122,8 @@ __global__ void __compute_mask(
 /// integer array (sized like fractal mask).
 /// The higher is the number, the higher is the shadow intensity.
 __global__ void __apply_shadow(
+    const int h_slice,
+    const int v_slice,
     const byte *__restrict__ mask,
     int *__restrict__ shadow);
 
@@ -180,14 +183,18 @@ __host__ void generate_art(const complex *c, byte *image, const byte *inside, co
 
     // For each pixel compute shadow value
     cudaEventRecord(start);
-    grid_size = dim3(
-        ceil((float)H_EXTENDED / block_size.x),
-        ceil((float)V_EXTENDED / block_size.y));
-    __apply_shadow << <grid_size, block_size >> > (mask_d, shadow_d);
+    for (int i = 0; i < SLICES; i++)
+        for (int j = 0; j < SLICES; j++) {
+            grid_size = dim3(
+                ceil((float)(ceil((float)H_EXTENDED / block_size.x) - i) / SLICES),
+                ceil((float)(ceil((float)V_EXTENDED / block_size.y) - j) / SLICES));
+            __apply_shadow << <grid_size, block_size >> > (i, j, mask_d, shadow_d);
+            cudaDeviceSynchronize();
+            CHECK_KERNELCALL
+        }
     cudaEventRecord(stop);
     cudaDeviceSynchronize();
-    CHECK_KERNELCALL
-        cudaEventElapsedTime(&time, start, stop);
+    cudaEventElapsedTime(&time, start, stop);
     printf("Shadow application: %f\n", time);
 
     // For each pixel select final image, computing its shadow
@@ -257,14 +264,16 @@ __global__ void __compute_mask(
 }
 
 __global__ void __apply_shadow(
+    const int h_slice,
+    const int v_slice,
     const byte *__restrict__ mask,
     int *__restrict__ shadow) {
 #define SHADOW_TILE_DIM (BLOCK_DIM + 2 * SHADOW_DISTANCE) // shared shadow matrix side length
 #define SECTION (SHADOW_TILE_DIM / BLOCK_DIM) // shared pixel per thread dimension
 
     // Calculate coordinates of the pixel
-    int h = blockIdx.x * blockDim.x + threadIdx.x;
-    int v = blockIdx.y * blockDim.y + threadIdx.y;
+    int h = (SLICES * blockIdx.x + h_slice) * blockDim.x + threadIdx.x;
+    int v = (SLICES * blockIdx.y + v_slice) * blockDim.y + threadIdx.y;
 
     // Allocate and intialize shared space
     __shared__ unsigned short shadow_tile[SHADOW_TILE_DIM][SHADOW_TILE_DIM];
@@ -300,7 +309,7 @@ __global__ void __apply_shadow(
                 int x = h - SHADOW_DISTANCE + i;
                 int y = v - SHADOW_DISTANCE + j;
                 if (x >= 0 && x < H_EXTENDED && y >= 0 && y < V_EXTENDED)
-                    atomicAdd(&shadow[SHADOW_COORDINATES(x, y)], shadow_tile[i][j]);
+                    shadow[SHADOW_COORDINATES(x, y)] += shadow_tile[i][j];
             }
 
 #undef SECTION
