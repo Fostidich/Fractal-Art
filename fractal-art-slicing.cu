@@ -17,7 +17,7 @@
 #define SHADOW_TILT_H -64 // horizontal offset from where shadow is plotted
 #define SHADOW_TILT_V 32 // vertical offset from where shadow is plotted
 #define SHADOW_INTENSITY 0.8 // blackness of the shadow
-#define BLOCK_DIM 32 // threads per block dimension
+#define BLOCK_DIM 24 // threads per block dimension
 
 typedef unsigned char byte;
 typedef struct complex {
@@ -107,6 +107,9 @@ int main(int argc, char **argv) {
 #define MASK_COORDINATES(x, y) ((y) * H_EXTENDED + (x)) // linearized coordinates of mask
 #define SHADOW_COORDINATES(x, y) ((y) * H_EXTENDED + (x)) // linearized coordinates of shadow
 #define IMAGE_COORDINATES(x, y) ((y) * H_RES + (x)) // linearized coordinates of images
+#define SLICES (2 * ceil((float)SHADOW_DISTANCE / BLOCK_DIM) + 1) // number of slices needed to avoid memory collisions
+
+// TODO try precalculating SLICES
 
 /// The first iteration generates a black and white image (mask) where
 /// pixels inside (divergent) the fractal are black and pixels outside
@@ -121,6 +124,8 @@ __global__ void __compute_mask(
 /// integer array (sized like fractal mask).
 /// The higher is the number, the higher is the shadow intensity.
 __global__ void __apply_shadow(
+    const int h_slice,
+    const int v_slice,
     const byte *__restrict__ mask,
     int *__restrict__ shadow);
 
@@ -180,14 +185,18 @@ __host__ void generate_art(const complex *c, byte *image, const byte *inside, co
 
     // For each pixel compute shadow value
     cudaEventRecord(start);
-    grid_size = dim3(
-        ceil((float)H_EXTENDED / block_size.x),
-        ceil((float)V_EXTENDED / block_size.y));
-    __apply_shadow << <grid_size, block_size >> > (mask_d, shadow_d);
+    for (int i = 0; i < SLICES; i++)
+        for (int j = 0; j < SLICES; j++) {
+            grid_size = dim3( // TODO try using normal approximation instead of ceil
+                ceil((float)(ceil((float)H_EXTENDED / block_size.x) - i) / SLICES),
+                ceil((float)(ceil((float)V_EXTENDED / block_size.y) - j) / SLICES));
+            __apply_shadow << <grid_size, block_size >> > (i, j, mask_d, shadow_d);
+            cudaDeviceSynchronize();
+            CHECK_KERNELCALL
+        }
     cudaEventRecord(stop);
     cudaDeviceSynchronize();
-    CHECK_KERNELCALL
-        cudaEventElapsedTime(&time, start, stop);
+    cudaEventElapsedTime(&time, start, stop);
     printf("Shadow application: %f\n", time);
 
     // For each pixel select final image, computing its shadow
@@ -257,14 +266,16 @@ __global__ void __compute_mask(
 }
 
 __global__ void __apply_shadow(
+    const int h_slice,
+    const int v_slice,
     const byte *__restrict__ mask,
     int *__restrict__ shadow) {
 #define SHADOW_TILE_DIM (BLOCK_DIM + 2 * SHADOW_DISTANCE) // shared shadow matrix side length
 #define SECTION (SHADOW_TILE_DIM / BLOCK_DIM) // shared pixel per thread dimension
 
     // Calculate coordinates of the pixel
-    int h = blockIdx.x * blockDim.x + threadIdx.x;
-    int v = blockIdx.y * blockDim.y + threadIdx.y;
+    int h = (SLICES * blockIdx.x + h_slice) * blockDim.x + threadIdx.x;
+    int v = (SLICES * blockIdx.y + v_slice) * blockDim.y + threadIdx.y;
 
     // Allocate and intialize shared space
     __shared__ unsigned short shadow_tile[SHADOW_TILE_DIM][SHADOW_TILE_DIM];
@@ -273,21 +284,20 @@ __global__ void __apply_shadow(
             if (i < SHADOW_TILE_DIM && j < SHADOW_TILE_DIM)
                 shadow_tile[i][j] = 0;
 
+    // Check boundaries and ignore points in the image below
+    bool plot = h < H_EXTENDED && v < V_EXTENDED && mask[MASK_COORDINATES(h, v)] == OUT;
+
     __syncthreads();
 
-    // Check boundaries and ignore points in the image below
-    if (h < H_EXTENDED && v < V_EXTENDED && mask[MASK_COORDINATES(h, v)] == OUT) {
+    // Plot a circular shadow
+    for (int i = -SHADOW_DISTANCE; i <= SHADOW_DISTANCE; i++) {
+        for (int j = -SHADOW_DISTANCE; j <= SHADOW_DISTANCE; j++) {
+            __syncthreads();
 
-        // Plot a circular shadow
-        for (int i = -SHADOW_DISTANCE; i <= SHADOW_DISTANCE; i++) {
-            for (int j = -SHADOW_DISTANCE; j <= SHADOW_DISTANCE; j++) {
-                // FIXME __syncthreads();
-
-                // Increment shadow value if the current shadow index is inside borders and radius
-                if (h + i < H_EXTENDED && h + i >= 0 && v + j < V_EXTENDED && v + j >= 0 &&
-                    i * i + j * j < SHADOW_DISTANCE * SHADOW_DISTANCE)
-                    shadow_tile[SHADOW_DISTANCE + threadIdx.x + i][SHADOW_DISTANCE + threadIdx.y + j]++;
-            }
+            // Increment shadow value if the current shadow index is inside borders and radius
+            if (plot && h + i < H_EXTENDED && h + i >= 0 && v + j < V_EXTENDED && v + j >= 0 &&
+                i * i + j * j < SHADOW_DISTANCE * SHADOW_DISTANCE)
+                shadow_tile[SHADOW_DISTANCE + threadIdx.x + i][SHADOW_DISTANCE + threadIdx.y + j]++;
         }
     }
 
@@ -300,7 +310,7 @@ __global__ void __apply_shadow(
                 int x = h - SHADOW_DISTANCE + i;
                 int y = v - SHADOW_DISTANCE + j;
                 if (x >= 0 && x < H_EXTENDED && y >= 0 && y < V_EXTENDED)
-                    atomicAdd(&shadow[SHADOW_COORDINATES(x, y)], shadow_tile[i][j]);
+                    shadow[SHADOW_COORDINATES(x, y)] += shadow_tile[i][j];
             }
 
 #undef SECTION
@@ -334,8 +344,8 @@ __global__ void __assign_final(
         // Shadow intensity computation
         float toner = (exp(-SHADOW_SHARPNESS *
             shadow[SHADOW_COORDINATES(
-                H_EXTENSION + h + SHADOW_TILT_H,
-                V_EXTENSION + v + SHADOW_TILT_V)] /
+                H_EXTENSION + h + (SHADOW_TILT_H),
+                V_EXTENSION + v + (SHADOW_TILT_V))] /
             (3.1416 * SHADOW_DISTANCE * SHADOW_DISTANCE))) *
             SHADOW_INTENSITY + (1 - SHADOW_INTENSITY);
 

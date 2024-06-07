@@ -17,7 +17,7 @@
 #define SHADOW_TILT_H -64 // horizontal offset from where shadow is plotted
 #define SHADOW_TILT_V 32 // vertical offset from where shadow is plotted
 #define SHADOW_INTENSITY 0.8 // blackness of the shadow
-#define BLOCK_DIM 32 // threads per block dimension
+#define BLOCK_DIM 24 // threads per block dimension
 
 typedef unsigned char byte;
 typedef struct complex {
@@ -263,12 +263,22 @@ __global__ void __compute_mask(
     }
 }
 
+#define SHADOW_TILE_DIM (BLOCK_DIM + 2 * SHADOW_DISTANCE) // shared shadow matrix side length
+#define CHILD_BLOCK_DIM 16 // threads per block dimension in child kernel
+
+/// Each pixel plotting a shadow launches this child kernel to
+/// plot the full circular shadow in parallel.
+__global__ void __plot_shadow_dot(
+    const bool plot,
+    const int h,
+    const int v,
+    unsigned short *__restrict__ shadow_tile);
+
 __global__ void __apply_shadow(
     const int h_slice,
     const int v_slice,
     const byte *__restrict__ mask,
     int *__restrict__ shadow) {
-#define SHADOW_TILE_DIM (BLOCK_DIM + 2 * SHADOW_DISTANCE) // shared shadow matrix side length
 #define SECTION (SHADOW_TILE_DIM / BLOCK_DIM) // shared pixel per thread dimension
 
     // Calculate coordinates of the pixel
@@ -282,23 +292,17 @@ __global__ void __apply_shadow(
             if (i < SHADOW_TILE_DIM && j < SHADOW_TILE_DIM)
                 shadow_tile[i][j] = 0;
 
+    // Check boundaries and ignore points in the image below
+    bool plot = h < H_EXTENDED && v < V_EXTENDED && mask[MASK_COORDINATES(h, v)] == OUT;
+
     __syncthreads();
 
-    // Check boundaries and ignore points in the image below
-    if (h < H_EXTENDED && v < V_EXTENDED && mask[MASK_COORDINATES(h, v)] == OUT) {
-
-        // Plot a circular shadow
-        for (int i = -SHADOW_DISTANCE; i <= SHADOW_DISTANCE; i++) {
-            for (int j = -SHADOW_DISTANCE; j <= SHADOW_DISTANCE; j++) {
-                // FIXME __syncthreads();
-
-                // Increment shadow value if the current shadow index is inside borders and radius
-                if (h + i < H_EXTENDED && h + i >= 0 && v + j < V_EXTENDED && v + j >= 0 &&
-                    i * i + j * j < SHADOW_DISTANCE * SHADOW_DISTANCE)
-                    shadow_tile[SHADOW_DISTANCE + threadIdx.x + i][SHADOW_DISTANCE + threadIdx.y + j]++;
-            }
-        }
-    }
+    // Plot a circular shadow
+    dim3 block_size(CHILD_BLOCK_DIM, CHILD_BLOCK_DIM);
+    dim3 grid_size(
+        ceil((float)(2 * SHADOW_DISTANCE) / block_size.x),
+        ceil((float)(2 * SHADOW_DISTANCE) / block_size.y));
+    __plot_shadow_dot << <grid_size, block_size >> > (plot, h, v, (unsigned short *)shadow_tile);
 
     __syncthreads();
 
@@ -313,8 +317,25 @@ __global__ void __apply_shadow(
             }
 
 #undef SECTION
-#undef SHADOW_TILE_DIM
 }
+
+__global__ void __plot_shadow_dot(
+    const bool plot,
+    const int h,
+    const int v,
+    unsigned short *__restrict__ shadow_tile) {
+
+    int i = blockIdx.x * blockDim.x + threadIdx.x - SHADOW_DISTANCE;
+    int j = blockIdx.y * blockDim.y + threadIdx.y - SHADOW_DISTANCE;
+
+    // Increment shadow value if the current shadow index is inside borders and radius
+    if (plot && h + i < H_EXTENDED && h + i >= 0 && v + j < V_EXTENDED && v + j >= 0 &&
+        i * i + j * j < SHADOW_DISTANCE * SHADOW_DISTANCE)
+        atomicAdd((unsigned int *)&shadow_tile[(SHADOW_DISTANCE + threadIdx.y + j) * SHADOW_TILE_DIM + SHADOW_DISTANCE + threadIdx.x + i], 1);
+
+}
+
+#undef SHADOW_TILE_DIM
 
 __global__ void __assign_final(
     const int *__restrict__ shadow,
@@ -343,8 +364,8 @@ __global__ void __assign_final(
         // Shadow intensity computation
         float toner = (exp(-SHADOW_SHARPNESS *
             shadow[SHADOW_COORDINATES(
-                H_EXTENSION + h + SHADOW_TILT_H,
-                V_EXTENSION + v + SHADOW_TILT_V)] /
+                H_EXTENSION + h + (SHADOW_TILT_H),
+                V_EXTENSION + v + (SHADOW_TILT_V))] /
             (3.1416 * SHADOW_DISTANCE * SHADOW_DISTANCE))) *
             SHADOW_INTENSITY + (1 - SHADOW_INTENSITY);
 
