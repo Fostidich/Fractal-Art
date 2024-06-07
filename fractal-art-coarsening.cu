@@ -312,7 +312,7 @@ __global__ void __apply_shadow(
             int x = h - SHADOW_DISTANCE + i;
             int y = v - SHADOW_DISTANCE + j;
             if (x >= 0 && x < H_EXTENDED && y >= 0 && y < V_EXTENDED)
-                atomicAdd(&shadow[SHADOW_COORDINATES(x, y)], shadow_tile[i][j]);
+                shadow[SHADOW_COORDINATES(x, y)] += shadow_tile[i][j];
         }
 }
 
@@ -328,9 +328,9 @@ __global__ void __plot_shadow_dot(
     if (h + i < H_EXTENDED && h + i >= 0 && v + j < V_EXTENDED && v + j >= 0 &&
         i * i + j * j < SHADOW_DISTANCE * SHADOW_DISTANCE)
         atomicAdd((unsigned int *)&shadow_tile[(SHADOW_DISTANCE + threadIdx.y + j) * SHADOW_TILE_DIM + SHADOW_DISTANCE + threadIdx.x + i], 1);
-
 }
 
+#undef CHILD_BLOCK_DIM
 #undef SHADOW_TILE_DIM
 
 __global__ void __assign_final(

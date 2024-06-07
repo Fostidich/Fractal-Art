@@ -305,7 +305,7 @@ __global__ void __apply_shadow(
             int x = h - SHADOW_DISTANCE + i;
             int y = v - SHADOW_DISTANCE + j;
             if (x >= 0 && x < H_EXTENDED && y >= 0 && y < V_EXTENDED)
-                atomicAdd(&shadow[SHADOW_COORDINATES(x, y)], shadow_tile[i][j]);
+                shadow[SHADOW_COORDINATES(x, y)] += shadow_tile[i][j];
         }
 
 #undef SHADOW_TILE_DIM
