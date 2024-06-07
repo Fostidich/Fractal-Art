@@ -18,7 +18,7 @@
 #define SHADOW_TILT_H -64 // horizontal offset from where shadow is plotted
 #define SHADOW_TILT_V 32 // vertical offset from where shadow is plotted
 #define SHADOW_INTENSITY 0.8 // blackness of the shadow
-#define BLOCK_DIM 32 // threads per block dimension
+#define BLOCK_DIM 18 // threads per block dimension
 
 typedef unsigned char byte;
 typedef struct complex {
@@ -261,9 +261,6 @@ __global__ void __apply_shadow(
     const byte *__restrict__ mask,
     int *__restrict__ shadow) {
 #define SHADOW_TILE_DIM (BLOCK_DIM + 2 * SHADOW_DISTANCE) // shared shadow matrix side length
-#define SECTION (SHADOW_TILE_DIM / BLOCK_DIM) // shared pixel per thread dimension
-
-// TODO what if SECTION is a float 
 
     // Calculate coordinates of the pixel
     int h = blockIdx.x * blockDim.x + threadIdx.x;
@@ -271,15 +268,12 @@ __global__ void __apply_shadow(
 
     // Allocate and intialize shared space
     __shared__ unsigned short shadow_tile[SHADOW_TILE_DIM][SHADOW_TILE_DIM];
-    for (int i = threadIdx.x * SECTION; i < (threadIdx.x + 1) * SECTION; i++)
-        for (int j = threadIdx.y * SECTION; j < (threadIdx.y + 1) * SECTION; j++)
-            if (i < SHADOW_TILE_DIM && j < SHADOW_TILE_DIM)
+    for (int i = threadIdx.x; i < SHADOW_TILE_DIM; i += BLOCK_DIM)
+        for (int j = threadIdx.y; j < SHADOW_TILE_DIM; j += BLOCK_DIM)
                 shadow_tile[i][j] = 0;
 
     // Check boundaries and ignore points in the image below
     bool plot = h < H_EXTENDED && v < V_EXTENDED && mask[MASK_COORDINATES(h, v)] == OUT;
-
-    __syncthreads(); // FIXME do we need this sync?
 
     // Plot a circular shadow
     for (int i = -SHADOW_DISTANCE; i <= SHADOW_DISTANCE; i++) {
@@ -296,16 +290,14 @@ __global__ void __apply_shadow(
     __syncthreads();
 
     // Update global memory with shadow values
-    for (int i = threadIdx.x * SECTION; i < (threadIdx.x + 1) * SECTION; i++)
-        for (int j = threadIdx.y * SECTION; j < (threadIdx.y + 1) * SECTION; j++)
-            if (i < SHADOW_TILE_DIM && j < SHADOW_TILE_DIM) {
-                int x = h - SHADOW_DISTANCE + i;
-                int y = v - SHADOW_DISTANCE + j;
-                if (x >= 0 && x < H_EXTENDED && y >= 0 && y < V_EXTENDED)
-                    atomicAdd(&shadow[SHADOW_COORDINATES(x, y)], shadow_tile[i][j]);
-            }
+    for (int i = threadIdx.x; i < SHADOW_TILE_DIM; i += BLOCK_DIM)
+        for (int j = threadIdx.y; j < SHADOW_TILE_DIM; j += BLOCK_DIM) {
+            int x = h - SHADOW_DISTANCE + i;
+            int y = v - SHADOW_DISTANCE + j;
+            if (x >= 0 && x < H_EXTENDED && y >= 0 && y < V_EXTENDED)
+                atomicAdd(&shadow[SHADOW_COORDINATES(x, y)], shadow_tile[i][j]);
+        }
 
-#undef SECTION
 #undef SHADOW_TILE_DIM
 }
 

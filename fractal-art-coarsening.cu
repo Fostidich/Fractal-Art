@@ -264,12 +264,13 @@ __global__ void __compute_mask(
 }
 
 #define SHADOW_TILE_DIM (BLOCK_DIM + 2 * SHADOW_DISTANCE) // shared shadow matrix side length
-#define CHILD_BLOCK_DIM 16 // threads per block dimension in child kernel
+#define CHILD_BLOCK_DIM BLOCK_DIM // threads per block dimension in child kernel
+
+// TODO tune CHILD_BLOCK_DIM
 
 /// Each pixel plotting a shadow launches this child kernel to
 /// plot the full circular shadow in parallel.
 __global__ void __plot_shadow_dot(
-    const bool plot,
     const int h,
     const int v,
     unsigned short *__restrict__ shadow_tile);
@@ -279,7 +280,6 @@ __global__ void __apply_shadow(
     const int v_slice,
     const byte *__restrict__ mask,
     int *__restrict__ shadow) {
-#define SECTION (SHADOW_TILE_DIM / BLOCK_DIM) // shared pixel per thread dimension
 
     // Calculate coordinates of the pixel
     int h = (SLICES * blockIdx.x + h_slice) * blockDim.x + threadIdx.x;
@@ -287,9 +287,8 @@ __global__ void __apply_shadow(
 
     // Allocate and intialize shared space
     __shared__ unsigned short shadow_tile[SHADOW_TILE_DIM][SHADOW_TILE_DIM];
-    for (int i = threadIdx.x * SECTION; i < (threadIdx.x + 1) * SECTION; i++)
-        for (int j = threadIdx.y * SECTION; j < (threadIdx.y + 1) * SECTION; j++)
-            if (i < SHADOW_TILE_DIM && j < SHADOW_TILE_DIM)
+    for (int i = threadIdx.x; i < SHADOW_TILE_DIM; i += BLOCK_DIM)
+        for (int j = threadIdx.y; j < SHADOW_TILE_DIM; j += BLOCK_DIM)
                 shadow_tile[i][j] = 0;
 
     // Check boundaries and ignore points in the image below
@@ -298,29 +297,29 @@ __global__ void __apply_shadow(
     __syncthreads();
 
     // Plot a circular shadow
-    dim3 block_size(CHILD_BLOCK_DIM, CHILD_BLOCK_DIM);
-    dim3 grid_size(
-        ceil((float)(2 * SHADOW_DISTANCE) / block_size.x),
-        ceil((float)(2 * SHADOW_DISTANCE) / block_size.y));
-    __plot_shadow_dot << <grid_size, block_size >> > (plot, h, v, (unsigned short *)shadow_tile);
+    if (plot) {
+        dim3 block_size(CHILD_BLOCK_DIM, CHILD_BLOCK_DIM);
+        dim3 grid_size(
+            ceil((float)(2 * SHADOW_DISTANCE) / block_size.x),
+            ceil((float)(2 * SHADOW_DISTANCE) / block_size.y));
+        __plot_shadow_dot << <grid_size, block_size >> > (h, v, (unsigned short *)shadow_tile);
+    }
+
+    // FIXME how should we wait for child kernel conclusion here?
 
     __syncthreads();
 
     // Update global memory with shadow values
-    for (int i = threadIdx.x * SECTION; i < (threadIdx.x + 1) * SECTION; i++)
-        for (int j = threadIdx.y * SECTION; j < (threadIdx.y + 1) * SECTION; j++)
-            if (i < SHADOW_TILE_DIM && j < SHADOW_TILE_DIM) {
-                int x = h - SHADOW_DISTANCE + i;
-                int y = v - SHADOW_DISTANCE + j;
-                if (x >= 0 && x < H_EXTENDED && y >= 0 && y < V_EXTENDED)
-                    shadow[SHADOW_COORDINATES(x, y)] += shadow_tile[i][j];
-            }
-
-#undef SECTION
+    for (int i = threadIdx.x; i < SHADOW_TILE_DIM; i += BLOCK_DIM)
+        for (int j = threadIdx.y; j < SHADOW_TILE_DIM; j += BLOCK_DIM) {
+            int x = h - SHADOW_DISTANCE + i;
+            int y = v - SHADOW_DISTANCE + j;
+            if (x >= 0 && x < H_EXTENDED && y >= 0 && y < V_EXTENDED)
+                atomicAdd(&shadow[SHADOW_COORDINATES(x, y)], shadow_tile[i][j]);
+        }
 }
 
 __global__ void __plot_shadow_dot(
-    const bool plot,
     const int h,
     const int v,
     unsigned short *__restrict__ shadow_tile) {
@@ -329,7 +328,7 @@ __global__ void __plot_shadow_dot(
     int j = blockIdx.y * blockDim.y + threadIdx.y - SHADOW_DISTANCE;
 
     // Increment shadow value if the current shadow index is inside borders and radius
-    if (plot && h + i < H_EXTENDED && h + i >= 0 && v + j < V_EXTENDED && v + j >= 0 &&
+    if (h + i < H_EXTENDED && h + i >= 0 && v + j < V_EXTENDED && v + j >= 0 &&
         i * i + j * j < SHADOW_DISTANCE * SHADOW_DISTANCE)
         atomicAdd((unsigned int *)&shadow_tile[(SHADOW_DISTANCE + threadIdx.y + j) * SHADOW_TILE_DIM + SHADOW_DISTANCE + threadIdx.x + i], 1);
 
