@@ -8,4 +8,10 @@ the fractal borders, and the other outside.
 
 A shadow effect creates an illusion of depth.
 
+The optimization steps are made in the following order:
+- naive;
+- tiling;
+- slicing;
+- coarsening.
+
 ###### C code written by Francesco Ostidich
