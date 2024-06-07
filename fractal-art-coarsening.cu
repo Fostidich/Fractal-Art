@@ -291,13 +291,10 @@ __global__ void __apply_shadow(
         for (int j = threadIdx.y; j < SHADOW_TILE_DIM; j += BLOCK_DIM)
                 shadow_tile[i][j] = 0;
 
-    // Check boundaries and ignore points in the image below
-    bool plot = h < H_EXTENDED && v < V_EXTENDED && mask[MASK_COORDINATES(h, v)] == OUT;
-
     __syncthreads();
 
-    // Plot a circular shadow
-    if (plot) {
+    // Plot a circular shadow, checking boundaries and ignore points in the image below
+    if (h < H_EXTENDED && v < V_EXTENDED && mask[MASK_COORDINATES(h, v)] == OUT) {
         dim3 block_size(CHILD_BLOCK_DIM, CHILD_BLOCK_DIM);
         dim3 grid_size(
             ceil((float)(2 * SHADOW_DISTANCE) / block_size.x),
