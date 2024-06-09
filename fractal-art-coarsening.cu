@@ -307,10 +307,10 @@ __global__ void __apply_shadow(
     __syncthreads();
 
     // Update global memory with shadow values
-    for (int i = 0; i < SHADOW_TILE_DIM; i += BLOCK_DIM)
-        for (int j = 0; j < SHADOW_TILE_DIM; j += BLOCK_DIM) {
-            int x = h - SHADOW_DISTANCE + i;
-            int y = v - SHADOW_DISTANCE + j;
+    for (int i = threadIdx.x; i < SHADOW_TILE_DIM; i += BLOCK_DIM)
+        for (int j = threadIdx.y; j < SHADOW_TILE_DIM; j += BLOCK_DIM) {
+            int x = h - threadIdx.x - SHADOW_DISTANCE + i;
+            int y = v - threadIdx.y - SHADOW_DISTANCE + j;
             if (x >= 0 && x < H_EXTENDED && y >= 0 && y < V_EXTENDED)
                 shadow[SHADOW_COORDINATES(x, y)] += shadow_tile[i][j];
         }
