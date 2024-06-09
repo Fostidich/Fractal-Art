@@ -107,7 +107,6 @@ int main(int argc, char **argv) {
 #define MASK_COORDINATES(x, y) ((y) * H_EXTENDED + (x)) // linearized coordinates of mask
 #define SHADOW_COORDINATES(x, y) ((y) * H_EXTENDED + (x)) // linearized coordinates of shadow
 #define IMAGE_COORDINATES(x, y) ((y) * H_RES + (x)) // linearized coordinates of images
-#define SLICES (2 * ceil((float)SHADOW_DISTANCE / BLOCK_DIM) + 1) // number of slices needed to avoid memory collisions
 
 /// The first iteration generates a black and white image (mask) where
 /// pixels inside (divergent) the fractal are black and pixels outside
@@ -122,8 +121,6 @@ __global__ void __compute_mask(
 /// integer array (sized like fractal mask).
 /// The higher is the number, the higher is the shadow intensity.
 __global__ void __apply_shadow(
-    const int h_slice,
-    const int v_slice,
     const byte *__restrict__ mask,
     int *__restrict__ shadow);
 
@@ -183,18 +180,14 @@ __host__ void generate_art(const complex *c, byte *image, const byte *inside, co
 
     // For each pixel compute shadow value
     cudaEventRecord(start);
-    for (int i = 0; i < SLICES; i++)
-        for (int j = 0; j < SLICES; j++) {
-            grid_size = dim3(
-                ceil((float)(ceil((float)H_EXTENDED / block_size.x) - i) / SLICES),
-                ceil((float)(ceil((float)V_EXTENDED / block_size.y) - j) / SLICES));
-            __apply_shadow << <grid_size, block_size >> > (i, j, mask_d, shadow_d);
-            cudaDeviceSynchronize();
-            CHECK_KERNELCALL
-        }
+    grid_size = dim3(
+        ceil((float)H_EXTENDED / block_size.x),
+        ceil((float)V_EXTENDED / block_size.y));
+    __apply_shadow << <grid_size, block_size >> > (mask_d, shadow_d);
     cudaEventRecord(stop);
     cudaDeviceSynchronize();
-    cudaEventElapsedTime(&time, start, stop);
+    CHECK_KERNELCALL
+        cudaEventElapsedTime(&time, start, stop);
     printf("Shadow application: %f\n", time);
 
     // For each pixel select final image, computing its shadow
@@ -263,7 +256,6 @@ __global__ void __compute_mask(
     }
 }
 
-#define SHADOW_TILE_DIM (BLOCK_DIM + 2 * SHADOW_DISTANCE) // shared shadow matrix side length
 #define CHILD_BLOCK_DIM BLOCK_DIM // threads per block dimension in child kernel
 
 // TODO tune CHILD_BLOCK_DIM
@@ -273,23 +265,15 @@ __global__ void __compute_mask(
 __global__ void __plot_shadow_dot(
     const int h,
     const int v,
-    unsigned short *__restrict__ shadow_tile);
+    int *__restrict__ shadow);
 
 __global__ void __apply_shadow(
-    const int h_slice,
-    const int v_slice,
     const byte *__restrict__ mask,
     int *__restrict__ shadow) {
 
     // Calculate coordinates of the pixel
-    int h = (SLICES * blockIdx.x + h_slice) * blockDim.x + threadIdx.x;
-    int v = (SLICES * blockIdx.y + v_slice) * blockDim.y + threadIdx.y;
-
-    // Allocate and intialize shared space
-    __shared__ unsigned short shadow_tile[SHADOW_TILE_DIM][SHADOW_TILE_DIM];
-    for (int i = threadIdx.x; i < SHADOW_TILE_DIM; i += BLOCK_DIM)
-        for (int j = threadIdx.y; j < SHADOW_TILE_DIM; j += BLOCK_DIM)
-                shadow_tile[i][j] = 0;
+    int h = blockIdx.x * blockDim.x + threadIdx.x;
+    int v = blockIdx.y * blockDim.y + threadIdx.y;
 
     __syncthreads();
 
@@ -299,27 +283,14 @@ __global__ void __apply_shadow(
         dim3 grid_size(
             ceil((float)(2 * SHADOW_DISTANCE) / block_size.x),
             ceil((float)(2 * SHADOW_DISTANCE) / block_size.y));
-        __plot_shadow_dot << <grid_size, block_size >> > (h, v, (unsigned short *)shadow_tile);
+        __plot_shadow_dot << <grid_size, block_size >> > (h, v, shadow);
     }
-
-    // FIXME how should we wait for child kernel conclusion here?
-
-    __syncthreads();
-
-    // Update global memory with shadow values
-    for (int i = threadIdx.x; i < SHADOW_TILE_DIM; i += BLOCK_DIM)
-        for (int j = threadIdx.y; j < SHADOW_TILE_DIM; j += BLOCK_DIM) {
-            int x = h - threadIdx.x - SHADOW_DISTANCE + i;
-            int y = v - threadIdx.y - SHADOW_DISTANCE + j;
-            if (x >= 0 && x < H_EXTENDED && y >= 0 && y < V_EXTENDED)
-                shadow[SHADOW_COORDINATES(x, y)] += shadow_tile[i][j];
-        }
 }
 
 __global__ void __plot_shadow_dot(
     const int h,
     const int v,
-    unsigned short *__restrict__ shadow_tile) {
+    int *__restrict__ shadow) {
 
     int i = blockIdx.x * blockDim.x + threadIdx.x - SHADOW_DISTANCE;
     int j = blockIdx.y * blockDim.y + threadIdx.y - SHADOW_DISTANCE;
@@ -327,11 +298,8 @@ __global__ void __plot_shadow_dot(
     // Increment shadow value if the current shadow index is inside borders and radius
     if (h + i < H_EXTENDED && h + i >= 0 && v + j < V_EXTENDED && v + j >= 0 &&
         i * i + j * j < SHADOW_DISTANCE * SHADOW_DISTANCE)
-        atomicAdd((unsigned int *)&shadow_tile[(SHADOW_DISTANCE + threadIdx.y + j) * SHADOW_TILE_DIM + SHADOW_DISTANCE + threadIdx.x + i], 1);
+        atomicAdd(&shadow[SHADOW_COORDINATES(h, v)], 1);
 }
-
-#undef CHILD_BLOCK_DIM
-#undef SHADOW_TILE_DIM
 
 __global__ void __assign_final(
     const int *__restrict__ shadow,
