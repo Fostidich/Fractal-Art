@@ -389,8 +389,6 @@ __global__ void __assign_final_out(
     }
 }
 
-// nothing
-
 __device__ inline void cmul(complex *outcome, const complex *first, const complex *second) {
     outcome->r = first->r * second->r - first->i * second->i;
     outcome->i = first->r * second->i + first->i * second->r;
