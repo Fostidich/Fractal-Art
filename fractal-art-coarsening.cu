@@ -157,7 +157,7 @@ __host__ void generate_art(const complex *c, byte *image, const byte *inside, co
     cudaEventCreate(&stop);
 
     // Allocate memory
-    byte *mask_h, *mask_d, *inside_d, *outside_d, *image_d;block_size.x
+    byte *mask_h, *mask_d, *inside_d, *outside_d, *image_d;
     int *shadow_d, *in_pixel_h, *out_pixel_h, *in_pixel_d, *out_pixel_d;
     cudaMalloc(&mask_d, V_EXTENDED * H_EXTENDED * sizeof(byte));
     cudaMalloc(&shadow_d, V_EXTENDED * H_EXTENDED * sizeof(int));
