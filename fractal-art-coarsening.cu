@@ -375,11 +375,9 @@ __global__ void __assign_final_out(
 
     // Calculate index of the pixel
     int i = (blockIdx.y * blockDim.y + threadIdx.y) * gridDim.x * blockDim.x + blockIdx.x * blockDim.x + threadIdx.x;
-    i *= COARSENING_FACTOR;
 
     // Compute assignments on consecutive pixels
-    for (int j = 0; j < COARSENING_FACTOR; j++) {
-        if (i >= out_len) return;
+    for (; i < out_len; i += out_len / COARSENING_FACTOR) {
         int image_idx = out_pixel[i];
 
         // Outside image assignment
