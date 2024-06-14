@@ -138,14 +138,14 @@ __global__ void __assign_final_in(
     const int *__restrict__ in_pixel,
     const int *__restrict__ shadow,
     const byte *__restrict__ inside,
-    byte *__restrict__ image);
+    byte *image);
 
 /// This iteration assigns the outside image.
 __global__ void __assign_final_out(
     const int out_len,
     const int *__restrict__ out_pixel,
     const byte *__restrict__ outside,
-    byte *__restrict__ image);
+    byte *image);
 
 __host__ void generate_art(const complex *c, byte *image, const byte *inside, const byte *outside) {
 
@@ -230,6 +230,8 @@ __host__ void generate_art(const complex *c, byte *image, const byte *inside, co
         ceil(sqrt((float)in / block_size.x)),
         ceil(sqrt((float)in / block_size.y)));
     __assign_final_in << <grid_size, block_size >> > (in, in_pixel_d, shadow_d, inside_d, image_d);
+    cudaDeviceSynchronize();
+    CHECK_KERNELCALL
     grid_size = dim3(
         ceil(sqrt((float)out / block_size.x / COARSENING_FACTOR)),
         ceil(sqrt((float)out / block_size.y / COARSENING_FACTOR)));
@@ -345,7 +347,7 @@ __global__ void __assign_final_in(
     const int *__restrict__ in_pixel,
     const int *__restrict__ shadow,
     const byte *__restrict__ inside,
-    byte *__restrict__ image) {
+    byte *image) {
 
     // Calculate index of the pixel
     int i = (blockIdx.y * blockDim.y + threadIdx.y) * gridDim.x * blockDim.x + blockIdx.x * blockDim.x + threadIdx.x;
@@ -368,7 +370,7 @@ __global__ void __assign_final_out(
     const int out_len,
     const int *__restrict__ out_pixel,
     const byte *__restrict__ outside,
-    byte *__restrict__ image) {
+    byte *image) {
 
     // Calculate index of the pixel
     int i = (blockIdx.y * blockDim.y + threadIdx.y) * gridDim.x * blockDim.x + blockIdx.x * blockDim.x + threadIdx.x;
