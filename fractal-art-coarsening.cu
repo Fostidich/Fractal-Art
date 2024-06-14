@@ -226,6 +226,8 @@ __host__ void generate_art(const complex *c, byte *image, const byte *inside, co
     // For each pixel select final image, computing its shadow
     cudaEventRecord(start);
     __assign_final_in << <ceil((float)in / BLOCK_DIM), BLOCK_DIM >> > (in, in_pixel_d, shadow_d, inside_d, image_d);
+    cudaDeviceSynchronize();
+    CHECK_KERNELCALL
     __assign_final_out << <ceil((float)out / BLOCK_DIM / COARSENING_FACTOR), BLOCK_DIM >> > (out, out_pixel_d, outside_d, image_d);
     cudaEventRecord(stop);
     cudaDeviceSynchronize();
