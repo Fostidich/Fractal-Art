@@ -157,7 +157,7 @@ __host__ void generate_art(const complex *c, byte *image, const byte *inside, co
     cudaEventCreate(&stop);
 
     // Allocate memory
-    byte *mask_h, *mask_d, *inside_d, *outside_d, *image_d;
+    byte *mask_h, *mask_d, *inside_d, *outside_d, *image_d;block_size.x
     int *shadow_d, *in_pixel_h, *out_pixel_h, *in_pixel_d, *out_pixel_d;
     cudaMalloc(&mask_d, V_EXTENDED * H_EXTENDED * sizeof(byte));
     cudaMalloc(&shadow_d, V_EXTENDED * H_EXTENDED * sizeof(int));
@@ -233,8 +233,8 @@ __host__ void generate_art(const complex *c, byte *image, const byte *inside, co
     cudaDeviceSynchronize();
     CHECK_KERNELCALL
     grid_size = dim3(
-        ceil(sqrt((float)out / block_size.x / COARSENING_FACTOR)),
-        ceil(sqrt((float)out / block_size.y / COARSENING_FACTOR)));
+        ceil(sqrt((float)out / COARSENING_FACTOR / block_size.x)),
+        ceil(sqrt((float)out / COARSENING_FACTOR / block_size.y)));
     __assign_final_out << <grid_size, block_size >> > (out, out_pixel_d, outside_d, image_d);
     cudaEventRecord(stop);
     cudaDeviceSynchronize();
@@ -380,6 +380,7 @@ __global__ void __assign_final_out(
     for (int j = 0; j < COARSENING_FACTOR; j++) {
         if (i < out_len) return;
         int image_idx = out_pixel[i];
+        if (3 * image_idx + 2 >= 3 * V_RES * H_RES) return;
 
         // Outside image assignment
         image[3 * image_idx + 0] = outside[3 * image_idx + 0];
