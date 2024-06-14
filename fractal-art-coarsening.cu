@@ -215,11 +215,12 @@ __host__ void generate_art(const complex *c, byte *image, const byte *inside, co
     // Divide mask elements into in e out array
     cudaMemcpy(mask_h, mask_d, V_EXTENDED * H_EXTENDED * sizeof(byte), cudaMemcpyDeviceToHost);
     int in = 0, out = 0;
-    for (int i = 0; i < V_RES * H_RES; i++)
-        if (mask_h[H_EXTENDED * V_EXTENSION + (1 + 2 * i / H_RES) * H_EXTENSION] == IN)
-            in_pixel_h[in++] = i;
-        else
-            out_pixel_h[out++] = i;
+    for (int i = 0; i < H_RES; i++)
+        for (int j = 0; j < V_RES; j++)
+            if (mask_h[MASK_COORDINATES(i + H_EXTENSION, j + V_EXTENSION)] == IN)
+                in_pixel_h[in++] = IMAGE_COORDINATES(i, j);
+            else
+                out_pixel_h[out++] = IMAGE_COORDINATES(i, j);
     cudaMemcpy(in_pixel_d, in_pixel_h, V_EXTENDED * H_EXTENDED * sizeof(int), cudaMemcpyHostToDevice);
     cudaMemcpy(out_pixel_d, out_pixel_h, V_EXTENDED * H_EXTENDED * sizeof(int), cudaMemcpyHostToDevice);
 
@@ -229,11 +230,9 @@ __host__ void generate_art(const complex *c, byte *image, const byte *inside, co
         ceil(sqrt((float)in / block_size.x)),
         ceil(sqrt((float)in / block_size.y)));
     __assign_final_in << <grid_size, block_size >> > (in, in_pixel_d, shadow_d, inside_d, image_d);
-    cudaDeviceSynchronize();
-    CHECK_KERNELCALL
     grid_size = dim3(
-        ceil(sqrt((float)in / block_size.x / COARSENING_FACTOR)),
-        ceil(sqrt((float)in / block_size.y / COARSENING_FACTOR)));
+        ceil(sqrt((float)out / block_size.x / COARSENING_FACTOR)),
+        ceil(sqrt((float)out / block_size.y / COARSENING_FACTOR)));
     __assign_final_out << <grid_size, block_size >> > (out, out_pixel_d, outside_d, image_d);
     cudaEventRecord(stop);
     cudaDeviceSynchronize();
@@ -349,7 +348,7 @@ __global__ void __assign_final_in(
     byte *__restrict__ image) {
 
     // Calculate index of the pixel
-    int i = (blockIdx.y * blockDim.y + threadIdx.y) * gridDim.x + blockIdx.x * blockDim.x + threadIdx.x;
+    int i = (blockIdx.y * blockDim.y + threadIdx.y) * gridDim.x * blockDim.x + blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= in_len) return;
     int image_idx = in_pixel[i];
 
@@ -372,15 +371,18 @@ __global__ void __assign_final_out(
     byte *__restrict__ image) {
 
     // Calculate index of the pixel
-    int i = (blockIdx.y * blockDim.y + threadIdx.y) * gridDim.x + blockIdx.x * blockDim.x + threadIdx.x;
+    int i = (blockIdx.y * blockDim.y + threadIdx.y) * gridDim.x * blockDim.x + blockIdx.x * blockDim.x + threadIdx.x;
 
     // Compute assignments on consecutive pixels
-    for (int image_idx = out_pixel[i]; i < out_len; i += COARSENING_FACTOR) {
+    for (int j = 0; j < COARSENING_FACTOR; j++) {
+        int image_idx = out_pixel[i];
 
         // Outside image assignment
         image[3 * image_idx + 0] = outside[3 * image_idx + 0];
         image[3 * image_idx + 1] = outside[3 * image_idx + 1];
         image[3 * image_idx + 2] = outside[3 * image_idx + 2];
+
+        i++;
     }
 }
 
