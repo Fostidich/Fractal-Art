@@ -230,8 +230,6 @@ __host__ void generate_art(const complex *c, byte *image, const byte *inside, co
         ceil(sqrt((float)in / block_size.x)),
         ceil(sqrt((float)in / block_size.y)));
     __assign_final_in << <grid_size, block_size >> > (in, in_pixel_d, shadow_d, inside_d, image_d);
-    cudaDeviceSynchronize();
-    CHECK_KERNELCALL
     grid_size = dim3(
         ceil(sqrt((float)out / COARSENING_FACTOR / block_size.x)),
         ceil(sqrt((float)out / COARSENING_FACTOR / block_size.y)));
@@ -356,7 +354,10 @@ __global__ void __assign_final_in(
 
     // Shadow intensity computation
     float toner = (exp(-SHADOW_SHARPNESS *
-        shadow[H_EXTENDED * V_EXTENSION + (1 + 2 * image_idx / H_RES) * H_EXTENSION] /
+        shadow[SHADOW_COORDINATES(
+            i % H_RES + H_EXTENSION,
+            i / H_RES + V_EXTENSION
+        )] /
         (3.1416 * SHADOW_DISTANCE * SHADOW_DISTANCE))) *
         SHADOW_INTENSITY + (1 - SHADOW_INTENSITY);
 
