@@ -355,8 +355,8 @@ __global__ void __assign_final_in(
     // Shadow intensity computation
     float toner = (exp(-SHADOW_SHARPNESS *
         shadow[SHADOW_COORDINATES(
-            i % H_RES + H_EXTENSION,
-            i / H_RES + V_EXTENSION
+            image_idx % H_RES + H_EXTENSION,
+            image_idx / H_RES + V_EXTENSION
         )] /
         (3.1416 * SHADOW_DISTANCE * SHADOW_DISTANCE))) *
         SHADOW_INTENSITY + (1 - SHADOW_INTENSITY);
