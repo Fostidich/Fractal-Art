@@ -225,10 +225,16 @@ __host__ void generate_art(const complex *c, byte *image, const byte *inside, co
 
     // For each pixel select final image, computing its shadow
     cudaEventRecord(start);
-    __assign_final_in << <ceil((float)in / BLOCK_DIM), BLOCK_DIM >> > (in, in_pixel_d, shadow_d, inside_d, image_d);
+    grid_size = dim3(
+        ceil(sqrt((float)in / block_size.x)),
+        ceil(sqrt((float)in / block_size.y)));
+    __assign_final_in << <grid_size, block_size >> > (in, in_pixel_d, shadow_d, inside_d, image_d);
     cudaDeviceSynchronize();
     CHECK_KERNELCALL
-    __assign_final_out << <ceil((float)out / BLOCK_DIM / COARSENING_FACTOR), BLOCK_DIM >> > (out, out_pixel_d, outside_d, image_d);
+    grid_size = dim3(
+        ceil(sqrt((float)in / block_size.x / COARSENING_FACTOR)),
+        ceil(sqrt((float)in / block_size.y / COARSENING_FACTOR)));
+    __assign_final_out << <grid_size, block_size >> > (out, out_pixel_d, outside_d, image_d);
     cudaEventRecord(stop);
     cudaDeviceSynchronize();
     CHECK_KERNELCALL
@@ -343,7 +349,7 @@ __global__ void __assign_final_in(
     byte *__restrict__ image) {
 
     // Calculate index of the pixel
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int i = (blockIdx.y * blockDim.y + threadIdx.y) * gridDim.x + blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= in_len) return;
     int image_idx = in_pixel[i];
 
@@ -366,7 +372,7 @@ __global__ void __assign_final_out(
     byte *__restrict__ image) {
 
     // Calculate index of the pixel
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    int i = (blockIdx.y * blockDim.y + threadIdx.y) * gridDim.x + blockIdx.x * blockDim.x + threadIdx.x;
 
     // Compute assignments on consecutive pixels
     for (int image_idx = out_pixel[i]; i < out_len; i += COARSENING_FACTOR) {
