@@ -216,14 +216,17 @@ __host__ void generate_art(const complex *c, byte *image, const byte *inside, co
     cudaMemcpy(mask_h, mask_d, V_EXTENDED * H_EXTENDED * sizeof(byte), cudaMemcpyDeviceToHost);
     int in = 0, out = 0;
     for (int i = 0; i < V_RES * H_RES; i++)
-        (mask_h[H_EXTENDED * V_EXTENSION + (1 + 2 * i / H_RES) * H_EXTENSION] == IN ? in_pixel_h[in++] : out_pixel_h[out++]) = i;
+        if (mask_h[H_EXTENDED * V_EXTENSION + (1 + 2 * i / H_RES) * H_EXTENSION] == IN)
+            in_pixel_h[in++] = i;
+        else
+            out_pixel_h[out++] = i;
     cudaMemcpy(in_pixel_d, in_pixel_h, V_EXTENDED * H_EXTENDED * sizeof(int), cudaMemcpyHostToDevice);
     cudaMemcpy(out_pixel_d, out_pixel_h, V_EXTENDED * H_EXTENDED * sizeof(int), cudaMemcpyHostToDevice);
 
     // For each pixel select final image, computing its shadow
     cudaEventRecord(start);
-    __assign_final_in << <ceil((float)in / BLOCK_DIM), BLOCK_DIM >> > (in, in_pixel_d, shadow_d, inside, image);
-    __assign_final_out << <ceil((float)out / BLOCK_DIM / COARSENING_FACTOR), BLOCK_DIM >> > (out, out_pixel_d, outside, image);
+    __assign_final_in << <ceil((float)in / BLOCK_DIM), BLOCK_DIM >> > (in, in_pixel_d, shadow_d, inside_d, image_d);
+    __assign_final_out << <ceil((float)out / BLOCK_DIM / COARSENING_FACTOR), BLOCK_DIM >> > (out, out_pixel_d, outside_d, image_d);
     cudaEventRecord(stop);
     cudaDeviceSynchronize();
     CHECK_KERNELCALL
@@ -356,18 +359,15 @@ __global__ void __assign_final_in(
 
 __global__ void __assign_final_out(
     const int out_len,
-    const byte *__restrict__ out_pixel,
+    const int *__restrict__ out_pixel,
     const byte *__restrict__ outside,
     byte *__restrict__ image) {
 
     // Calculate index of the pixel
-    int i = (blockIdx.x * blockDim.x + threadIdx.x) * COARSENING_FACTOR;
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
 
     // Compute assignments on consecutive pixels
-    for (int j = 0; j < COARSENING_FACTOR; j++) {
-        i += j;
-        if (i >= out_len) return;
-        int image_idx = out_pixel[i];
+    for (int image_idx = out_pixel[i]; i < out_len; i += COARSENING_FACTOR) {
 
         // Outside image assignment
         image[3 * image_idx + 0] = outside[3 * image_idx + 0];
