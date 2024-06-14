@@ -378,6 +378,7 @@ __global__ void __assign_final_out(
 
     // Compute assignments on consecutive pixels
     for (int j = 0; j < COARSENING_FACTOR; j++) {
+        if (i < out_len) return;
         int image_idx = out_pixel[i];
 
         // Outside image assignment
