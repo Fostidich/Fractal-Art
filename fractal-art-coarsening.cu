@@ -12,7 +12,7 @@
 #define CENTER_Y 0 // Y coordinate for image center
 #define SCALE 2 // maximum X value in the fractal graph
 #define ITERATIONS (1 << 8) // number of iteration for checking divergence
-#define R (1 << 8) // ceiling upon which function is considered divergent
+#define R 2 // ceiling upon which function is considered divergent
 #define SHADOW_DISTANCE 64 // radius of the circular shadow plot
 #define SHADOW_SHARPNESS 1 // rapidity with which shadow gets dark
 #define SHADOW_TILT_H -64 // horizontal offset from where shadow is plotted
@@ -109,7 +109,7 @@ int main(int argc, char **argv) {
 #define SHADOW_COORDINATES(x, y) ((y) * H_EXTENDED + (x)) // linearized coordinates of shadow
 #define IMAGE_COORDINATES(x, y) ((y) * H_RES + (x)) // linearized coordinates of images
 #define SLICES (2 * (SHADOW_DISTANCE + BLOCK_DIM - 1) / BLOCK_DIM + 1) // number of slices needed to avoid memory collisions
-#define COARSE_BLOCK (1 << 4) // pixel block dimension assigned to a single thread in the first iteration
+#define COARSE_BLOCK (1 << 8) // pixel block dimension assigned to a single thread in the first iteration
 #define COARSE_FACTOR (1 << 2) // division factor on pixel block size at each coarsening iteration
 
 /// Compile time check that coarse block is a power of coarse factor
@@ -145,8 +145,10 @@ __global__ void assign_final(
     const byte *__restrict__ outside,
     byte *__restrict__ image);
 
+/// Constant c value of fractal function
 __constant__ complex c;
 
+/// Mask address global value used to avoid useless parameter passing in recursive kernel
 __device__ byte *mask;
 
 __host__ void generate_art(const complex *c_param, byte *image, const byte *inside, const byte *outside) {
@@ -191,20 +193,20 @@ __host__ void generate_art(const complex *c_param, byte *image, const byte *insi
     compute_mask << <grid_size, block_size >> > (0, 0, COARSE_BLOCK);
     cudaEventRecord(stop);
     cudaDeviceSynchronize();
-    CHECK_KERNELCALL
-        cudaEventElapsedTime(&time, start, stop);
+    CHECK_KERNELCALL;
+    cudaEventElapsedTime(&time, start, stop);
     printf("Mask computation: %f\n", time);
 
     // For each pixel compute shadow value
     cudaEventRecord(start);
     for (int i = 0; i < SLICES; i++)
         for (int j = 0; j < SLICES; j++) {
-            grid_size = dim3( // TODO try using normal approximation instead of ceil
-                ceil((float)(ceil((float)H_EXTENDED / block_size.x) - i) / SLICES),
-                ceil((float)(ceil((float)V_EXTENDED / block_size.y) - j) / SLICES));
+            grid_size = dim3(
+                ceil((float)(round((float)H_EXTENDED / block_size.x) - i) / SLICES),
+                ceil((float)(round((float)V_EXTENDED / block_size.y) - j) / SLICES));
             apply_shadow << <grid_size, block_size >> > (i, j, mask_d, shadow_d);
             cudaDeviceSynchronize();
-            CHECK_KERNELCALL
+            CHECK_KERNELCALL;
         }
     cudaEventRecord(stop);
     cudaDeviceSynchronize();
@@ -219,8 +221,8 @@ __host__ void generate_art(const complex *c_param, byte *image, const byte *insi
     assign_final << <grid_size, block_size >> > (shadow_d, mask_d, inside_d, outside_d, image_d);
     cudaEventRecord(stop);
     cudaDeviceSynchronize();
-    CHECK_KERNELCALL
-        cudaEventElapsedTime(&time, start, stop);
+    CHECK_KERNELCALL;
+    cudaEventElapsedTime(&time, start, stop);
     printf("Final assignment: %f\n", time);
 
     // Data transfer to host
@@ -244,8 +246,8 @@ __host__ void generate_art(const complex *c_param, byte *image, const byte *insi
 /// Fractal value is computed on the pixel coordinates provided. Mask is then updated accordingly.
 __device__ int compute_pixel(const int h, const int v);
 
-/// Coarse block vertices are computed, and if number of iteration is equal to all, return true.
-__device__ bool common_vertices(const int hpin, const int vpin, const int coarse_size);
+/// Coarse block border is computed, and if number of iteration is equal to all pixels, return true.
+__device__ bool common_border(const int hpin, const int vpin, const int coarse_size);
 
 __global__ void compute_mask(
     const int hpin,
@@ -256,17 +258,17 @@ __global__ void compute_mask(
     int h = (blockIdx.x * blockDim.x + threadIdx.x) * coarse_size + hpin;
     int v = (blockIdx.y * blockDim.y + threadIdx.y) * coarse_size + vpin;
 
-    if (common_vertices(hpin, vpin, coarse_size)) {
-
-        // Coarse block has the same computation effort required for each pixel
-        for (int i = 0; i < coarse_size; i++)
-            for (int j = 0; j < coarse_size; j++)
-                compute_pixel(h + i, v + j);
-
-    } else if (coarse_size == 1) {
+    if (coarse_size == 1) {
 
         // Coarse block is minimal size, i.e. each thread computes one pixel
         compute_pixel(h, v);
+
+    } else if (common_border(hpin, vpin, coarse_size)) {
+
+        // Coarse block has the same outcome for each pixel inside
+        for (int i = 1; i < coarse_size - 1; i++)
+            for (int j = 1; j < coarse_size - 1; j++)
+                mask[MASK_COORDINATES(h + i, v + j)];
 
     } else {
 
@@ -278,9 +280,9 @@ __global__ void compute_mask(
     }
 }
 
-__device__ bool common_vertices(const int hpin, const int vpin, const int coarse_size) {
-    // TODO try checking the full border
-        // Calculate number of iterations for first pixel
+__device__ bool common_border(const int hpin, const int vpin, const int coarse_size) {
+
+    // Calculate number of iterations for first pixel
     int temp = compute_pixel(hpin, vpin);
 
     // Check if other vertices have the require the same number of iterations
@@ -290,7 +292,17 @@ __device__ bool common_vertices(const int hpin, const int vpin, const int coarse
         temp != compute_pixel(hpin + coarse_size - 1, vpin + coarse_size - 1)
         ) return false;
 
-    // If all vertices require same number of iterations, return true
+    // Check actual sides excluding vertices
+    for (int i = 1; i < coarse_size - 1; i++) {
+        if (
+            temp != compute_pixel(hpin + i, vpin) ||
+            temp != compute_pixel(hpin + i, vpin + coarse_size - 1) ||
+            temp != compute_pixel(hpin, vpin + i) ||
+            temp != compute_pixel(hpin + coarse_size - 1, vpin + i)
+        ) return false;
+    }
+
+    // If all border's pixels require same number of iterations, return true
     return true;
 }
 

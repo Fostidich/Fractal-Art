@@ -11,7 +11,7 @@
 #define CENTER_Y 0 // Y coordinate for image center
 #define SCALE 2 // maximum X value in the fractal graph
 #define ITERATIONS (1 << 8) // number of iteration for checking divergence
-#define R (1 << 8) // ceiling upon which function is considered divergent
+#define R 2 // ceiling upon which function is considered divergent
 #define SHADOW_DISTANCE 64 // radius of the circular shadow plot
 #define SHADOW_SHARPNESS 1 // rapidity with which shadow gets dark
 #define SHADOW_TILT_H -64 // horizontal offset from where shadow is plotted
@@ -174,8 +174,8 @@ __host__ void generate_art(const complex *c, byte *image, const byte *inside, co
     compute_mask << <grid_size, block_size >> > (*c, mask_d);
     cudaEventRecord(stop);
     cudaDeviceSynchronize();
-    CHECK_KERNELCALL
-        cudaEventElapsedTime(&time, start, stop);
+    CHECK_KERNELCALL;
+    cudaEventElapsedTime(&time, start, stop);
     printf("Mask computation: %f\n", time);
 
     // For each pixel compute shadow value
@@ -186,8 +186,8 @@ __host__ void generate_art(const complex *c, byte *image, const byte *inside, co
     apply_shadow << <grid_size, block_size >> > (mask_d, shadow_d);
     cudaEventRecord(stop);
     cudaDeviceSynchronize();
-    CHECK_KERNELCALL
-        cudaEventElapsedTime(&time, start, stop);
+    CHECK_KERNELCALL;
+    cudaEventElapsedTime(&time, start, stop);
     printf("Shadow application: %f\n", time);
 
     // For each pixel select final image, computing its shadow
@@ -198,8 +198,8 @@ __host__ void generate_art(const complex *c, byte *image, const byte *inside, co
     assign_final << <grid_size, block_size >> > (shadow_d, mask_d, inside_d, outside_d, image_d);
     cudaEventRecord(stop);
     cudaDeviceSynchronize();
-    CHECK_KERNELCALL
-        cudaEventElapsedTime(&time, start, stop);
+    CHECK_KERNELCALL;
+    cudaEventElapsedTime(&time, start, stop);
     printf("Final assignment: %f\n", time);
 
     // Data transfer to host
