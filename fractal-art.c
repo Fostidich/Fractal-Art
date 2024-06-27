@@ -87,19 +87,19 @@ int main(int argc, char **argv) {
 
 /// The first iteration generates a black and white image (mask) where
 /// pixels inside the fractal are black and pixels outside are white.
-void __compute_mask(int h, int v, int h_max, int v_max, const complex *c, byte *mask);
+void compute_mask(int h, int v, int h_max, int v_max, const complex *c, byte *mask);
 
 /// The second iteration plots a circular shadow for each white pixel of
 /// the just generated fractal mask.
 /// This is done by adding one to the corresponding elements of the shadow
 /// integer array (sized like fractal mask).
 /// The higher is the number, the higher is the shadow intensity.
-void __apply_shadow(int h, int v, int h_max, int v_max, const byte *mask, int *shadow);
+void apply_shadow(int h, int v, int h_max, int v_max, const byte *mask, int *shadow);
 
 /// The third iteration assigns the inside and the outside images.
 /// The shadow toner for the inner image is computed starting from the corresponding
 /// value in the shadow array.
-void __assign_final(int h, int v, const int *shadow, const byte *mask, const byte *inside, const byte *outside, byte *image);
+void assign_final(int h, int v, const int *shadow, const byte *mask, const byte *inside, const byte *outside, byte *image);
 
 void generate_fractal(const complex *c, byte *image, const byte *inside, const byte *outside) {
     // Required vertical dimension due to shadow offset
@@ -114,17 +114,17 @@ void generate_fractal(const complex *c, byte *image, const byte *inside, const b
     // For each pixel compute fractal mask
     for (int h = 0; h < H_EXTENDED; h++)
         for (int v = 0; v < V_EXTENDED; v++)
-            __compute_mask(h, v, H_EXTENDED, V_EXTENDED, c, mask);
+            compute_mask(h, v, H_EXTENDED, V_EXTENDED, c, mask);
 
     // For each pixel compute shadow value
     for (int h = 0; h < H_EXTENDED; h++)
         for (int v = 0; v < V_EXTENDED; v++)
-            __apply_shadow(h, v, H_EXTENDED, V_EXTENDED, mask, shadow);
+            apply_shadow(h, v, H_EXTENDED, V_EXTENDED, mask, shadow);
 
     // For each pixel select final image, computing its shadow
     for (int h = 0; h < H_RES; h++)
         for (int v = 0; v < V_RES; v++)
-            __assign_final(h, v, shadow, mask, inside, outside, image);
+            assign_final(h, v, shadow, mask, inside, outside, image);
 
     // Free fractal mask and shadow memory
     free(mask);
@@ -134,7 +134,7 @@ void generate_fractal(const complex *c, byte *image, const byte *inside, const b
 #undef V_EXTENDED
 }
 
-void __compute_mask(int h, int v, int h_max, int v_max, const complex *c, byte *mask) {
+void compute_mask(int h, int v, int h_max, int v_max, const complex *c, byte *mask) {
 
     // Calculate index of the pixel
     int idx = v * h_max + h;
@@ -166,7 +166,7 @@ void __compute_mask(int h, int v, int h_max, int v_max, const complex *c, byte *
     }
 }
 
-void __apply_shadow(int h, int v, int h_max, int v_max, const byte *mask, int *shadow) {
+void apply_shadow(int h, int v, int h_max, int v_max, const byte *mask, int *shadow) {
 
     // Calculate index of the pixel
     int idx = v * h_max + h;
@@ -192,7 +192,7 @@ void __apply_shadow(int h, int v, int h_max, int v_max, const byte *mask, int *s
     }
 }
 
-void __assign_final(int h, int v, const int *shadow, const byte *mask, const byte *inside, const byte *outside, byte *image) {
+void assign_final(int h, int v, const int *shadow, const byte *mask, const byte *inside, const byte *outside, byte *image) {
 
     // Calculate index of the pixel
     int idx = v * H_RES + h;

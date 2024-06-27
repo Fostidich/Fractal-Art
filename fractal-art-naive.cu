@@ -111,7 +111,7 @@ int main(int argc, char **argv) {
 /// The first iteration generates a black and white image (mask) where
 /// pixels inside (divergent) the fractal are black and pixels outside
 /// (convergent) are white.
-__global__ void __compute_mask(
+__global__ void compute_mask(
     const complex c,
     byte *__restrict__ mask);
 
@@ -120,14 +120,14 @@ __global__ void __compute_mask(
 /// This is done by adding one to the corresponding elements of the shadow
 /// integer array (sized like fractal mask).
 /// The higher is the number, the higher is the shadow intensity.
-__global__ void __apply_shadow(
+__global__ void apply_shadow(
     const byte *__restrict__ mask,
     int *__restrict__ shadow);
 
 /// The third iteration assigns the inside and the outside images.
 /// The shadow toner for the inner image is computed starting from the corresponding
 /// value in the shadow array.
-__global__ void __assign_final(
+__global__ void assign_final(
     const int *__restrict__ shadow,
     const byte *__restrict__ mask,
     const byte *__restrict__ inside,
@@ -171,7 +171,7 @@ __host__ void generate_art(const complex *c, byte *image, const byte *inside, co
     grid_size = dim3(
         ceil((float)H_EXTENDED / block_size.x),
         ceil((float)V_EXTENDED / block_size.y));
-    __compute_mask << <grid_size, block_size >> > (*c, mask_d);
+    compute_mask << <grid_size, block_size >> > (*c, mask_d);
     cudaEventRecord(stop);
     cudaDeviceSynchronize();
     CHECK_KERNELCALL
@@ -183,7 +183,7 @@ __host__ void generate_art(const complex *c, byte *image, const byte *inside, co
     grid_size = dim3(
         ceil((float)H_EXTENDED / block_size.x),
         ceil((float)V_EXTENDED / block_size.y));
-    __apply_shadow << <grid_size, block_size >> > (mask_d, shadow_d);
+    apply_shadow << <grid_size, block_size >> > (mask_d, shadow_d);
     cudaEventRecord(stop);
     cudaDeviceSynchronize();
     CHECK_KERNELCALL
@@ -195,7 +195,7 @@ __host__ void generate_art(const complex *c, byte *image, const byte *inside, co
     grid_size = dim3(
         ceil((float)H_RES / block_size.x),
         ceil((float)V_RES / block_size.y));
-    __assign_final << <grid_size, block_size >> > (shadow_d, mask_d, inside_d, outside_d, image_d);
+    assign_final << <grid_size, block_size >> > (shadow_d, mask_d, inside_d, outside_d, image_d);
     cudaEventRecord(stop);
     cudaDeviceSynchronize();
     CHECK_KERNELCALL
@@ -220,7 +220,7 @@ __host__ void generate_art(const complex *c, byte *image, const byte *inside, co
     cudaEventDestroy(stop);
 }
 
-__global__ void __compute_mask(
+__global__ void compute_mask(
     const complex c,
     byte *__restrict__ mask) {
 
@@ -256,7 +256,7 @@ __global__ void __compute_mask(
     }
 }
 
-__global__ void __apply_shadow(
+__global__ void apply_shadow(
     const byte *__restrict__ mask,
     int *__restrict__ shadow) {
 
@@ -284,7 +284,7 @@ __global__ void __apply_shadow(
     }
 }
 
-__global__ void __assign_final(
+__global__ void assign_final(
     const int *__restrict__ shadow,
     const byte *__restrict__ mask,
     const byte *__restrict__ inside,
@@ -320,6 +320,7 @@ __global__ void __assign_final(
         image[3 * image_idx + 0] = inside[3 * image_idx + 0] * toner;
         image[3 * image_idx + 1] = inside[3 * image_idx + 1] * toner;
         image[3 * image_idx + 2] = inside[3 * image_idx + 2] * toner;
+
     }
 }
 
