@@ -265,7 +265,7 @@ __global__ void compute_mask(
         // Coarse block is minimal size, i.e. each thread computes one pixel
         compute_pixel(h, v);
 
-    } else if (common_border(hpin, vpin, coarse_size, &fill)) {
+    } else if (common_border(h, v, coarse_size, &fill)) {
 
         // Coarse block has the same outcome for each pixel inside
         int i_max, j_max;
@@ -288,26 +288,27 @@ __global__ void compute_mask(
 __device__ bool common_border(const int hpin, const int vpin, const int coarse_size, byte *fill) {
 
     // Calculate number of iterations for first pixel
-    *fill = compute_pixel(hpin, vpin);
+    byte temp = compute_pixel(hpin, vpin);
 
     // Check if other vertices have the require the same number of iterations
     if (
-        *fill != compute_pixel(hpin + coarse_size - 1, vpin) ||
-        *fill != compute_pixel(hpin, vpin + coarse_size - 1) ||
-        *fill != compute_pixel(hpin + coarse_size - 1, vpin + coarse_size - 1)
+        temp != compute_pixel(hpin + coarse_size - 1, vpin) ||
+        temp != compute_pixel(hpin, vpin + coarse_size - 1) ||
+        temp != compute_pixel(hpin + coarse_size - 1, vpin + coarse_size - 1)
         ) return false;
 
     // Check actual sides excluding vertices
     for (int i = 1; i < coarse_size - 1; i++) {
         if (
-            *fill != compute_pixel(hpin + i, vpin) ||
-            *fill != compute_pixel(hpin + i, vpin + coarse_size - 1) ||
-            *fill != compute_pixel(hpin, vpin + i) ||
-            *fill != compute_pixel(hpin + coarse_size - 1, vpin + i)
+            temp != compute_pixel(hpin + i, vpin) ||
+            temp != compute_pixel(hpin + i, vpin + coarse_size - 1) ||
+            temp != compute_pixel(hpin, vpin + i) ||
+            temp != compute_pixel(hpin + coarse_size - 1, vpin + i)
         ) return false;
     }
 
     // If all border's pixels require same number of iterations, return true
+    *fill = temp;
     return true;
 }
 
