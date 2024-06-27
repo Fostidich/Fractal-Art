@@ -268,8 +268,11 @@ __global__ void compute_mask(
     } else if (common_border(hpin, vpin, coarse_size, &fill)) {
 
         // Coarse block has the same outcome for each pixel inside
-        for (int i = 1; i < coarse_size - 1; i++)
-            for (int j = 1; j < coarse_size - 1; j++)
+        int i_max, j_max;
+        h + coarse_size - 2 < H_EXTENDED ? i_max = coarse_size - 1 : H_EXTENDED - h;
+        v + coarse_size - 2 < V_EXTENDED ? j_max = coarse_size - 1 : V_EXTENDED - v;
+        for (int i = 1; i < i_max; i++)
+            for (int j = 1; j < j_max; j++)
                 mask[MASK_COORDINATES(h + i, v + j)] = fill;
 
     } else {
