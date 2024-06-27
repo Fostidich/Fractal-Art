@@ -37,7 +37,7 @@ typedef struct complex {
 }
 
 /// Calculate fractal and shadow for each pixel point and assign images respectively
-__host__ void generate_art(const complex *c, byte *image, const byte *inside, const byte *outside);
+__host__ void generate_art(const complex *c_param, byte *image, const byte *inside, const byte *outside);
 
 /// Complex multiplication
 __device__ void cmul(complex *outcome, const complex *first, const complex *second);
@@ -109,8 +109,12 @@ int main(int argc, char **argv) {
 #define SHADOW_COORDINATES(x, y) ((y) * H_EXTENDED + (x)) // linearized coordinates of shadow
 #define IMAGE_COORDINATES(x, y) ((y) * H_RES + (x)) // linearized coordinates of images
 #define SLICES (2 * (SHADOW_DISTANCE + BLOCK_DIM - 1) / BLOCK_DIM + 1) // number of slices needed to avoid memory collisions
-#define COARSE_BLOCK (1 << 9) // pixel block dimension assigned to a single thread in the first iteration
-#define COARSE_FACTOR (1 << 3) // division factor on pixel block size at each coarsening iteration
+#define COARSE_BLOCK (1 << 4) // pixel block dimension assigned to a single thread in the first iteration
+#define COARSE_FACTOR (1 << 2) // division factor on pixel block size at each coarsening iteration
+
+/// Compile time check that coarse block is a power of coarse factor
+constexpr int log2(int x) { return x == 1 ? 0 : 1 + log2(x / 2); }
+static_assert(log2(COARSE_BLOCK) % log2(COARSE_FACTOR) == 0, "coarsening: block must be power of factor");
 
 /// The first iteration generates a black and white image (mask) where
 /// pixels inside (divergent) the fractal are black and pixels outside
@@ -118,9 +122,7 @@ int main(int argc, char **argv) {
 __global__ void compute_mask(
     const int hpin,
     const int vpin,
-    const int coarse_size,
-    const complex c,
-    byte *__restrict__ mask);
+    const int coarse_size);
 
 /// The second iteration plots a circular shadow for each outside pixel of
 /// the just generated fractal mask.
@@ -143,7 +145,11 @@ __global__ void assign_final(
     const byte *__restrict__ outside,
     byte *__restrict__ image);
 
-__host__ void generate_art(const complex *c, byte *image, const byte *inside, const byte *outside) {
+__constant__ complex c;
+
+__device__ byte *mask;
+
+__host__ void generate_art(const complex *c_param, byte *image, const byte *inside, const byte *outside) {
 
     // Initialize events
     float time;
@@ -167,6 +173,8 @@ __host__ void generate_art(const complex *c, byte *image, const byte *inside, co
 
     // Data transfer to device
     start_ms = milliseconds();
+    cudaMemcpyToSymbol(c, c_param, sizeof(complex));
+    cudaMemcpyToSymbol(mask, &mask_d, sizeof(byte *));
     cudaMemcpy(inside_d, inside, 3 * V_RES * H_RES * sizeof(byte), cudaMemcpyHostToDevice);
     cudaMemcpy(outside_d, outside, 3 * V_RES * H_RES * sizeof(byte), cudaMemcpyHostToDevice);
     stop_ms = milliseconds();
@@ -180,7 +188,7 @@ __host__ void generate_art(const complex *c, byte *image, const byte *inside, co
     grid_size = dim3(
         ceil((float)H_EXTENDED / block_size.x / COARSE_BLOCK),
         ceil((float)V_EXTENDED / block_size.y / COARSE_BLOCK));
-    compute_mask << <grid_size, block_size >> > (0, 0, COARSE_BLOCK, *c, mask_d);
+    compute_mask << <grid_size, block_size >> > (0, 0, COARSE_BLOCK);
     cudaEventRecord(stop);
     cudaDeviceSynchronize();
     CHECK_KERNELCALL
@@ -234,61 +242,59 @@ __host__ void generate_art(const complex *c, byte *image, const byte *inside, co
 }
 
 /// Fractal value is computed on the pixel coordinates provided. Mask is then updated accordingly.
-__device__ int compute_pixel(const int h, const int v, const complex c, byte *__restrict__ mask);
+__device__ int compute_pixel(const int h, const int v);
 
 /// Coarse block vertices are computed, and if number of iteration is equal to all, return true.
-__device__ bool common_vertices(const int hpin, const int vpin, const int coarse_size, const complex c, byte *__restrict__ mask);
+__device__ bool common_vertices(const int hpin, const int vpin, const int coarse_size);
 
 __global__ void compute_mask(
     const int hpin,
     const int vpin,
-    const int coarse_size,
-    const complex c,
-    byte *__restrict__ mask) {
+    const int coarse_size) {
 
     // Calculate coordinates of the pixel
     int h = (blockIdx.x * blockDim.x + threadIdx.x) * coarse_size + hpin;
     int v = (blockIdx.y * blockDim.y + threadIdx.y) * coarse_size + vpin;
 
-    if (coarse_size == 1) {
-
-        // Coarse block is minimal size, i.e. each thread computes one pixel
-        compute_pixel(h, v, c, mask);
-
-    } else if (common_vertices(hpin, vpin, coarse_size, c, mask)) {
+    if (common_vertices(hpin, vpin, coarse_size)) {
 
         // Coarse block has the same computation effort required for each pixel
         for (int i = 0; i < coarse_size; i++)
             for (int j = 0; j < coarse_size; j++)
-                compute_pixel(h + i, v + j, c, mask);
+                compute_pixel(h + i, v + j);
+
+    } else if (coarse_size == 1) {
+
+        // Coarse block is minimal size, i.e. each thread computes one pixel
+        compute_pixel(h, v);
 
     } else {
 
         // Coarse block has heterogenous computation efforts
         dim3 grid_size(1, 1);
         dim3 block_size(COARSE_FACTOR, COARSE_FACTOR);
-        compute_mask << <grid_size, block_size >> > (h, v, coarse_size / COARSE_FACTOR, c, mask);
+        compute_mask << <grid_size, block_size >> > (h, v, coarse_size / COARSE_FACTOR);
 
     }
 }
 
-__device__ bool common_vertices(const int hpin, const int vpin, const int coarse_size, const complex c, byte *__restrict__ mask) {
-
-    // Calculate number of iterations for first pixel
-    int temp = compute_pixel(hpin, vpin, c, mask);
+__device__ bool common_vertices(const int hpin, const int vpin, const int coarse_size) {
+    // TODO try checking the full border
+        // Calculate number of iterations for first pixel
+    int temp = compute_pixel(hpin, vpin);
 
     // Check if other vertices have the require the same number of iterations
     if (
-        temp != compute_pixel(hpin + coarse_size - 1, vpin, c, mask) ||
-        temp != compute_pixel(hpin, vpin + coarse_size - 1, c, mask) ||
-        temp != compute_pixel(hpin + coarse_size - 1, vpin + coarse_size - 1, c, mask)
+        temp != compute_pixel(hpin + coarse_size - 1, vpin) ||
+        temp != compute_pixel(hpin, vpin + coarse_size - 1) ||
+        temp != compute_pixel(hpin + coarse_size - 1, vpin + coarse_size - 1)
         ) return false;
 
     // If all vertices require same number of iterations, return true
     return true;
 }
 
-__device__ int compute_pixel(const int h, const int v, const complex c, byte *__restrict__ mask) {
+__device__ int compute_pixel(const int h, const int v) {
 #define RES_UNIT ((double)SCALE / (H_RES / 2)) // side length of a pixel in the complex plane
 
     // Check boundaries
