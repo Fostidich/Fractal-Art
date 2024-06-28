@@ -338,6 +338,7 @@ __device__ bool common_border(const int hpin, const int vpin, const int coarse_s
 
     // Check actual sides
     bool *outcome = (bool *)malloc(sizeof(bool));
+    *outcome = true;
     border_pixel << <4, coarse_size >> > (hpin, vpin, coarse_size, temp, outcome);
 
     // If all border's pixels require same number of iterations, return true
