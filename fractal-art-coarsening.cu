@@ -275,7 +275,7 @@ __global__ void compute_mask(
         dim3 grid_size(
             ceil((float)coarse_size / block_size.x),
             ceil((float)coarse_size / block_size.x));
-        fill_block<<<grid_size, block_size>>>(h, v, fill);
+        fill_block << <grid_size, block_size >> > (h, v, fill);
 
     } else {
 
@@ -321,30 +321,41 @@ __device__ byte compute_pixel(const int h, const int v) {
 #undef RES_UNIT
 }
 
-__device__ bool common_border(const int hpin, const int vpin, const int coarse_size, byte *fill) { // TODO maybe launch kernels here
+/// When checking if the pixels in the border of a block have same value, that is done in parallel
+__global__ void border_pixel(const int hpin, const int vpin, const int coarse_size, byte fill, bool *outcome);
+
+__device__ bool common_border(const int hpin, const int vpin, const int coarse_size, byte *fill) {
 
     // Calculate number of iterations for first pixel
     byte temp = compute_pixel(hpin, vpin);
 
     // Check if other vertices have the require the same number of iterations
-    if (
+    if ( // TODO maybe launch kernels here
+        temp != compute_pixel(hpin + coarse_size - 1, vpin + coarse_size - 1) ||
         temp != compute_pixel(hpin + coarse_size - 1, vpin) ||
-        temp != compute_pixel(hpin, vpin + coarse_size - 1) ||
-        temp != compute_pixel(hpin + coarse_size - 1, vpin + coarse_size - 1)
+        temp != compute_pixel(hpin, vpin + coarse_size - 1)
         ) return false;
 
-    // Check actual sides excluding vertices
-    for (int i = 1; i < coarse_size - 1; i++)
-        if (
-            temp != compute_pixel(hpin + i, vpin) ||
-            temp != compute_pixel(hpin + i, vpin + coarse_size - 1) ||
-            temp != compute_pixel(hpin, vpin + i) ||
-            temp != compute_pixel(hpin + coarse_size - 1, vpin + i)
-            ) return false;
+    // Check actual sides
+    bool *outcome = (bool *)malloc(sizeof(bool));
+    border_pixel << <4, coarse_size >> > (hpin, vpin, coarse_size, temp, outcome);
 
     // If all border's pixels require same number of iterations, return true
     *fill = temp;
-    return true;
+    return outcome;
+}
+
+__global__ void border_pixel(const int hpin, const int vpin, const int coarse_size, byte fill, bool *outcome) {
+
+    // Early check if flag has already been flipped
+    if (!*outcome) return;
+
+    // Calculate coordinates of the pixel
+    int h = hpin + (coarse_size - 1) * blockIdx.x == 0 + (threadIdx.x) * blockIdx.x % 2 == 1;
+    int v = vpin + (coarse_size - 1) * blockIdx.x == 1 + (threadIdx.x) * blockIdx.x % 2 == 0;
+
+    // Check pixel outcome
+    if (fill != compute_pixel(h, v)) *outcome = false;
 }
 
 __global__ void fill_block(const int hpin, const int vpin, const byte fill) {
