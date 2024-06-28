@@ -337,19 +337,20 @@ __device__ bool common_border(const int hpin, const int vpin, const int coarse_s
         ) return false;
 
     // Check actual sides
-    bool *outcome = (bool *)malloc(sizeof(bool));
+    bool *outcome;
+    cudaMalloc(&outcome, sizeof(bool));
     *outcome = true;
     border_pixel << <4, coarse_size >> > (hpin, vpin, coarse_size, temp, outcome);
 
     // If all border's pixels require same number of iterations, return true
     *fill = temp;
-    return outcome;
+    return *outcome;
 }
 
 __global__ void border_pixel(const int hpin, const int vpin, const int coarse_size, byte fill, bool *outcome) {
 
     // Early check if flag has already been flipped
-    if (!*outcome) return;
+    if (!*outcome) return; // TODO maybe is better without
 
     // Calculate coordinates of the pixel
     int h = hpin + (coarse_size - 1) * blockIdx.x == 0 + (threadIdx.x) * blockIdx.x % 2 == 1;
@@ -365,11 +366,9 @@ __global__ void fill_block(const int hpin, const int vpin, const byte fill) {
     int h = blockIdx.x * blockDim.x + threadIdx.x + hpin;
     int v = blockIdx.y * blockDim.y + threadIdx.y + vpin;
 
-    // Check boundaries
-    if (h >= H_EXTENDED || v >= V_EXTENDED) return;
-
-    // Fill color
-    mask[MASK_COORDINATES(h, v)] = fill;
+    // Check boundaries and fill color
+    if (h < H_EXTENDED || v < V_EXTENDED) 
+        mask[MASK_COORDINATES(h, v)] = fill;
 }
 
 __global__ void apply_shadow(
