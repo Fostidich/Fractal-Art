@@ -268,12 +268,17 @@ __global__ void compute_mask(
     } else if (common_border(h, v, coarse_size, &fill)) {
 
         // Coarse block has the same outcome for each pixel inside
-        int i_max, j_max;
-        h + coarse_size - 2 < H_EXTENDED ? i_max = coarse_size - 1 : H_EXTENDED - h;
-        v + coarse_size - 2 < V_EXTENDED ? j_max = coarse_size - 1 : V_EXTENDED - v;
-        for (int i = 1; i < i_max; i++)
-            for (int j = 1; j < j_max; j++)
-                mask[MASK_COORDINATES(h + i, v + j)] = fill;
+        // int i_max, j_max;
+        // h + coarse_size - 2 < H_EXTENDED ? i_max = coarse_size - 1 : H_EXTENDED - h;
+        // v + coarse_size - 2 < V_EXTENDED ? j_max = coarse_size - 1 : V_EXTENDED - v;
+        // for (int i = 1; i < i_max; i++)
+        //     for (int j = 1; j < j_max; j++)
+        //         mask[MASK_COORDINATES(h + i, v + j)] = fill;
+
+        for (int i = 1; i < coarse_size - 1; i++)
+            for (int j = 1; j < coarse_size - 1; j++)
+                if (h + i < H_EXTENDED && v + j < V_EXTENDED)
+                    mask[MASK_COORDINATES(h + i, v + j)] = fill;
 
     } else {
 
@@ -285,7 +290,7 @@ __global__ void compute_mask(
     }
 }
 
-__device__ bool common_border(const int hpin, const int vpin, const int coarse_size, byte *fill) {
+__device__ bool common_border(const int hpin, const int vpin, const int coarse_size, byte *fill) { // TODO maybe launch kernels here
 
     // Calculate number of iterations for first pixel
     byte temp = compute_pixel(hpin, vpin);
@@ -298,14 +303,13 @@ __device__ bool common_border(const int hpin, const int vpin, const int coarse_s
         ) return false;
 
     // Check actual sides excluding vertices
-    for (int i = 1; i < coarse_size - 1; i++) {
+    for (int i = 1; i < coarse_size - 1; i++)
         if (
             temp != compute_pixel(hpin + i, vpin) ||
             temp != compute_pixel(hpin + i, vpin + coarse_size - 1) ||
             temp != compute_pixel(hpin, vpin + i) ||
             temp != compute_pixel(hpin + coarse_size - 1, vpin + i)
-        ) return false;
-    }
+            ) return false;
 
     // If all border's pixels require same number of iterations, return true
     *fill = temp;
