@@ -246,7 +246,7 @@ __host__ void generate_art(const complex *c_param, byte *image, const byte *insi
 /// Fractal value is computed on the pixel coordinates provided. Mask is then updated accordingly.
 __device__ byte compute_pixel(const int h, const int v);
 
-/// Coarse block border is computed, and if number of iteration is equal to all pixels, return true.
+/// Coarse block border is computed, and if color is equal to all pixels, return true.
 __device__ bool common_border(const int hpin, const int vpin, const int coarse_size, byte *fill);
 
 /// If block has same value for each pixel in the border, color is filled all together
@@ -326,10 +326,10 @@ __global__ void border_pixel(const int hpin, const int vpin, const int coarse_si
 
 __device__ bool common_border(const int hpin, const int vpin, const int coarse_size, byte *fill) {
 
-    // Calculate number of iterations for first pixel
+    // Calculate color for first pixel
     byte temp = compute_pixel(hpin, vpin);
 
-    // Check if other vertices have the require the same number of iterations
+    // Check if other vertices have the same color 
     if ( // TODO maybe launch kernels here
         temp != compute_pixel(hpin + coarse_size - 1, vpin + coarse_size - 1) ||
         temp != compute_pixel(hpin + coarse_size - 1, vpin) ||
@@ -337,14 +337,15 @@ __device__ bool common_border(const int hpin, const int vpin, const int coarse_s
         ) return false;
 
     // Check actual sides
-    bool *outcome;
-    cudaMalloc(&outcome, sizeof(bool));
+    bool *outcome = (bool *)malloc(sizeof(bool));
     *outcome = true;
     border_pixel << <4, coarse_size >> > (hpin, vpin, coarse_size, temp, outcome);
 
     // If all border's pixels require same number of iterations, return true
+    bool res = *outcome;
+    free(outcome);
     *fill = temp;
-    return *outcome;
+    return res;
 }
 
 __global__ void border_pixel(const int hpin, const int vpin, const int coarse_size, byte fill, bool *outcome) {
