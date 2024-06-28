@@ -249,6 +249,9 @@ __device__ byte compute_pixel(const int h, const int v);
 /// Coarse block border is computed, and if number of iteration is equal to all pixels, return true.
 __device__ bool common_border(const int hpin, const int vpin, const int coarse_size, byte *fill);
 
+/// If block has same value for each pixel in the border, color is filled all together
+__global__ void fill_block(const int hpin, const int vpin, const byte fill);
+
 __global__ void compute_mask(
     const int hpin,
     const int vpin,
@@ -268,17 +271,11 @@ __global__ void compute_mask(
     } else if (common_border(h, v, coarse_size, &fill)) {
 
         // Coarse block has the same outcome for each pixel inside
-        // int i_max, j_max;
-        // h + coarse_size - 2 < H_EXTENDED ? i_max = coarse_size - 1 : H_EXTENDED - h;
-        // v + coarse_size - 2 < V_EXTENDED ? j_max = coarse_size - 1 : V_EXTENDED - v;
-        // for (int i = 1; i < i_max; i++)
-        //     for (int j = 1; j < j_max; j++)
-        //         mask[MASK_COORDINATES(h + i, v + j)] = fill;
-
-        for (int i = 1; i < coarse_size - 1; i++)
-            for (int j = 1; j < coarse_size - 1; j++)
-                if (h + i < H_EXTENDED && v + j < V_EXTENDED)
-                    mask[MASK_COORDINATES(h + i, v + j)] = fill;
+        dim3 block_size(BLOCK_DIM, BLOCK_DIM);
+        dim3 grid_size(
+            ceil((float)coarse_size / block_size.x),
+            ceil((float)coarse_size / block_size.x));
+        fill_block<<<grid_size, block_size>>>(h, v, fill);
 
     } else {
 
@@ -288,32 +285,6 @@ __global__ void compute_mask(
         compute_mask << <grid_size, block_size >> > (h, v, coarse_size / COARSE_FACTOR);
 
     }
-}
-
-__device__ bool common_border(const int hpin, const int vpin, const int coarse_size, byte *fill) { // TODO maybe launch kernels here
-
-    // Calculate number of iterations for first pixel
-    byte temp = compute_pixel(hpin, vpin);
-
-    // Check if other vertices have the require the same number of iterations
-    if (
-        temp != compute_pixel(hpin + coarse_size - 1, vpin) ||
-        temp != compute_pixel(hpin, vpin + coarse_size - 1) ||
-        temp != compute_pixel(hpin + coarse_size - 1, vpin + coarse_size - 1)
-        ) return false;
-
-    // Check actual sides excluding vertices
-    for (int i = 1; i < coarse_size - 1; i++)
-        if (
-            temp != compute_pixel(hpin + i, vpin) ||
-            temp != compute_pixel(hpin + i, vpin + coarse_size - 1) ||
-            temp != compute_pixel(hpin, vpin + i) ||
-            temp != compute_pixel(hpin + coarse_size - 1, vpin + i)
-            ) return false;
-
-    // If all border's pixels require same number of iterations, return true
-    *fill = temp;
-    return true;
 }
 
 __device__ byte compute_pixel(const int h, const int v) {
@@ -348,6 +319,45 @@ __device__ byte compute_pixel(const int h, const int v) {
     return IN;
 
 #undef RES_UNIT
+}
+
+__device__ bool common_border(const int hpin, const int vpin, const int coarse_size, byte *fill) { // TODO maybe launch kernels here
+
+    // Calculate number of iterations for first pixel
+    byte temp = compute_pixel(hpin, vpin);
+
+    // Check if other vertices have the require the same number of iterations
+    if (
+        temp != compute_pixel(hpin + coarse_size - 1, vpin) ||
+        temp != compute_pixel(hpin, vpin + coarse_size - 1) ||
+        temp != compute_pixel(hpin + coarse_size - 1, vpin + coarse_size - 1)
+        ) return false;
+
+    // Check actual sides excluding vertices
+    for (int i = 1; i < coarse_size - 1; i++)
+        if (
+            temp != compute_pixel(hpin + i, vpin) ||
+            temp != compute_pixel(hpin + i, vpin + coarse_size - 1) ||
+            temp != compute_pixel(hpin, vpin + i) ||
+            temp != compute_pixel(hpin + coarse_size - 1, vpin + i)
+            ) return false;
+
+    // If all border's pixels require same number of iterations, return true
+    *fill = temp;
+    return true;
+}
+
+__global__ void fill_block(const int hpin, const int vpin, const byte fill) {
+
+    // Calculate coordinates of the pixel
+    int h = blockIdx.x * blockDim.x + threadIdx.x + hpin;
+    int v = blockIdx.y * blockDim.y + threadIdx.y + vpin;
+
+    // Check boundaries
+    if (h >= H_EXTENDED || v >= V_EXTENDED) return;
+
+    // Fill color
+    mask[MASK_COORDINATES(h, v)] = fill;
 }
 
 __global__ void apply_shadow(
