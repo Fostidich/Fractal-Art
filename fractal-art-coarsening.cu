@@ -261,32 +261,30 @@ __global__ void compute_mask(
     int h = (blockIdx.x * blockDim.x + threadIdx.x) * coarse_size + hpin;
     int v = (blockIdx.y * blockDim.y + threadIdx.y) * coarse_size + vpin;
 
-    byte *fill = (byte *)malloc(sizeof(byte));
+    byte fill;
 
     if (coarse_size == 1) {
 
         // Coarse block is minimal size, i.e. each thread computes one pixel
         compute_pixel(h, v);
 
-    } else if (common_border(h, v, coarse_size, fill)) {
+    } else if (common_border(h, v, coarse_size, &fill)) {
 
         // Coarse block has the same outcome for each pixel inside
         dim3 block_size(BLOCK_DIM, BLOCK_DIM);
         dim3 grid_size(
             ceil((float)coarse_size / block_size.x),
-            ceil((float)coarse_size / block_size.x));
-        fill_block << <grid_size, block_size >> > (h, v, *fill);
+            ceil((float)coarse_size / block_size.y));
+        fill_block << <grid_size, block_size >> > (h, v, fill);
 
     } else {
 
         // Coarse block has heterogenous computation efforts
-        dim3 grid_size(1, 1);
         dim3 block_size(COARSE_FACTOR, COARSE_FACTOR);
+        dim3 grid_size(1, 1);
         compute_mask << <grid_size, block_size >> > (h, v, coarse_size / COARSE_FACTOR);
 
     }
-
-    free(fill);
 }
 
 __device__ byte compute_pixel(const int h, const int v) {
@@ -343,7 +341,7 @@ __device__ bool common_border(const int hpin, const int vpin, const int coarse_s
     // *outcome = true;
     // border_pixel << <4, coarse_size - 1>> > (hpin, vpin, coarse_size, temp, outcome);
 
-    // // If all border's pixels require same color, return true
+    // If all border's pixels require same color, return true
     // bool res = *outcome;
     // free(outcome);
     // *fill = temp;
@@ -387,7 +385,7 @@ __global__ void fill_block(const int hpin, const int vpin, const byte fill) {
     int v = blockIdx.y * blockDim.y + threadIdx.y + vpin;
 
     // Check boundaries and fill color
-    if (h < H_EXTENDED || v < V_EXTENDED)
+    if (h < H_EXTENDED && v < V_EXTENDED)
         mask[MASK_COORDINATES(h, v)] = fill;
 }
 
