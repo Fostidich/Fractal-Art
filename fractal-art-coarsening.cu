@@ -261,21 +261,21 @@ __global__ void compute_mask(
     int h = (blockIdx.x * blockDim.x + threadIdx.x) * coarse_size + hpin;
     int v = (blockIdx.y * blockDim.y + threadIdx.y) * coarse_size + vpin;
 
-    byte fill;
+    byte *fill = (byte *)malloc(sizeof(byte));
 
     if (coarse_size == 1) {
 
         // Coarse block is minimal size, i.e. each thread computes one pixel
         compute_pixel(h, v);
 
-    } else if (common_border(h, v, coarse_size, &fill)) {
+    } else if (common_border(h, v, coarse_size, fill)) {
 
         // Coarse block has the same outcome for each pixel inside
         dim3 block_size(BLOCK_DIM, BLOCK_DIM);
         dim3 grid_size(
             ceil((float)coarse_size / block_size.x),
             ceil((float)coarse_size / block_size.x));
-        fill_block << <grid_size, block_size >> > (h, v, fill);
+        fill_block << <grid_size, block_size >> > (h, v, *fill);
 
     } else {
 
@@ -285,6 +285,8 @@ __global__ void compute_mask(
         compute_mask << <grid_size, block_size >> > (h, v, coarse_size / COARSE_FACTOR);
 
     }
+
+    free(fill);
 }
 
 __device__ byte compute_pixel(const int h, const int v) {
