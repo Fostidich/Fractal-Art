@@ -355,8 +355,8 @@ __device__ bool common_border(const int hpin, const int vpin, const int coarse_s
         for (int t = 0; t < coarse_size - 1; t++) {
 
             // Calculate coordinates of the pixel
-            int h = hpin + (coarse_size - 1) * b == 0 + t * blockIdx.x % 2 == 1;
-            int v = vpin + (coarse_size - 1) * b == 1 + t * blockIdx.x % 2 == 0;
+            int h = hpin + (coarse_size - 1) * b == 0 + t * b % 2 == 1;
+            int v = vpin + (coarse_size - 1) * b == 1 + t * b % 2 == 0;
 
             // Check pixel outcome
             if (temp != compute_pixel(h, v)) outcome = false;
