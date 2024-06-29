@@ -337,32 +337,32 @@ __device__ bool common_border(const int hpin, const int vpin, const int coarse_s
     //     ) return false;
 
     // Check block side pixels
-    // bool *outcome = (bool *)malloc(sizeof(bool));
-    // *outcome = true;
-    // border_pixel << <4, coarse_size - 1>> > (hpin, vpin, coarse_size, temp, outcome);
+    bool *outcome = (bool *)malloc(sizeof(bool));
+    *outcome = true;
+    border_pixel << <4, coarse_size - 1>> > (hpin, vpin, coarse_size, temp, outcome);
 
     // If all border's pixels require same color, return true
-    // bool res = *outcome;
-    // free(outcome);
-    // *fill = temp;
-    // return res;
-
-    // Check block side pixels
-    bool outcome = true;
-    for (int b = 0; b < 4; b++)
-        for (int t = 0; t < coarse_size - 1; t++) {
-
-            // Calculate coordinates of the pixel
-            int h = hpin + (coarse_size - 1) * b == 0 + t * b % 2 == 1;
-            int v = vpin + (coarse_size - 1) * b == 1 + t * b % 2 == 0;
-
-            // Check pixel outcome
-            if (temp != compute_pixel(h, v)) outcome = false;
-        }
-
-    // If all border's pixels require same color, return true
+    bool res = *outcome;
+    free(outcome);
     *fill = temp;
-    return outcome;
+    return res;
+
+    // // Check block side pixels
+    // bool outcome = true;
+    // for (int b = 0; b < 4; b++)
+    //     for (int t = 0; t < coarse_size - 1; t++) {
+
+    //         // Calculate coordinates of the pixel
+    //         int h = hpin + (coarse_size - 1) * (b == 0) + t * (b % 2 == 1);
+    //         int v = vpin + (coarse_size - 1) * (b == 1) + t * (b % 2 == 0);
+
+    //         // Check pixel outcome
+    //         if (temp != compute_pixel(h, v)) outcome = false;
+    //     }
+
+    // // If all border's pixels require same color, return true
+    // *fill = temp;
+    // return outcome;
 }
 
 __global__ void border_pixel(const int hpin, const int vpin, const int coarse_size, byte fill, bool *outcome) {
@@ -371,8 +371,8 @@ __global__ void border_pixel(const int hpin, const int vpin, const int coarse_si
     // if (!*outcome) return; // TODO maybe is better with
 
     // Calculate coordinates of the pixel
-    int h = hpin + (coarse_size - 1) * blockIdx.x == 0 + threadIdx.x * blockIdx.x % 2 == 1;
-    int v = vpin + (coarse_size - 1) * blockIdx.x == 1 + threadIdx.x * blockIdx.x % 2 == 0;
+    int h = hpin + (coarse_size - 1) * (blockIdx.x == 0) + threadIdx.x * (blockIdx.x % 2 == 1);
+    int v = vpin + (coarse_size - 1) * (blockIdx.x == 1) + threadIdx.x * (blockIdx.x % 2 == 0);
 
     // Check pixel outcome
     if (fill != compute_pixel(h, v)) *outcome = false;
