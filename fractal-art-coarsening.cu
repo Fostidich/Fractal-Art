@@ -151,9 +151,6 @@ __constant__ complex c;
 /// Mask address global value used to avoid useless parameter passing in recursive kernel
 __device__ byte *mask;
 
-/// Global allocation of common border check outcomes during mask computations
-__device__ bool *framed;
-
 __host__ void generate_art(const complex *c_param, byte *image, const byte *inside, const byte *outside) {
 
     // Initialize events
@@ -164,10 +161,8 @@ __host__ void generate_art(const complex *c_param, byte *image, const byte *insi
     cudaEventCreate(&stop);
 
     // Allocate memory
-    bool *framed_d;
     byte *mask_d, *inside_d, *outside_d, *image_d;
     int *shadow_d;
-    cudaMalloc(&framed_d, V_EXTENDED * H_EXTENDED * sizeof(bool));
     cudaMalloc(&mask_d, V_EXTENDED * H_EXTENDED * sizeof(byte));
     cudaMalloc(&shadow_d, V_EXTENDED * H_EXTENDED * sizeof(int));
     cudaMalloc(&inside_d, 3 * V_RES * H_RES * sizeof(byte));
@@ -175,13 +170,11 @@ __host__ void generate_art(const complex *c_param, byte *image, const byte *insi
     cudaMalloc(&image_d, 3 * V_RES * H_RES * sizeof(byte));
 
     // Data initialization
-    cudaMemset(mask_d, true, V_EXTENDED * H_EXTENDED * sizeof(bool));
     cudaMemset(mask_d, 0x00, V_EXTENDED * H_EXTENDED * sizeof(byte));
     cudaMemset(shadow_d, 0, V_EXTENDED * H_EXTENDED * sizeof(int));
 
     // Data transfer to device
     start_ms = milliseconds();
-    cudaMemcpyToSymbol(framed, framed_d, sizeof(bool *));
     cudaMemcpyToSymbol(c, c_param, sizeof(complex));
     cudaMemcpyToSymbol(mask, &mask_d, sizeof(byte *));
     cudaMemcpy(inside_d, inside, 3 * V_RES * H_RES * sizeof(byte), cudaMemcpyHostToDevice);
@@ -239,7 +232,6 @@ __host__ void generate_art(const complex *c_param, byte *image, const byte *insi
     printf("Memory transfer to host: %f\n", stop_ms - start_ms);
 
     // Free the allocated memory
-    cudaFree(framed_d);
     cudaFree(mask_d);
     cudaFree(shadow_d);
     cudaFree(inside_d);
@@ -330,39 +322,48 @@ __device__ byte compute_pixel(const int h, const int v) {
 }
 
 /// When checking if the pixels in the border of a block have same value, that is done in parallel
-__global__ void border_pixel(const int hpin, const int vpin, const int coarse_size, byte fill);
+__global__ void border_pixel(const int hpin, const int vpin, const int coarse_size, byte fill, bool *outcome);
 
 __device__ bool common_border(const int hpin, const int vpin, const int coarse_size, byte *fill) {
 
     // Calculate color for first pixel
     byte temp = compute_pixel(hpin, vpin);
 
-    // Check if other vertices have the same color 
-    if ( // TODO maybe launch kernels here
-        temp != compute_pixel(hpin + coarse_size - 1, vpin + coarse_size - 1) ||
-        temp != compute_pixel(hpin + coarse_size - 1, vpin) ||
-        temp != compute_pixel(hpin, vpin + coarse_size - 1)
-        ) return false;
+    // Check if other vertices have the same color
+    // if ( // TODO maybe compute here alone
+    //     temp != compute_pixel(hpin + coarse_size - 1, vpin + coarse_size - 1) ||
+    //     temp != compute_pixel(hpin + coarse_size - 1, vpin) ||
+    //     temp != compute_pixel(hpin, vpin + coarse_size - 1)
+    //     ) return false;
 
-    // Check actual sides
-    border_pixel << <4, coarse_size >> > (hpin, vpin, coarse_size, temp);
+    // Check block side pixels
+    bool *outcome = (bool *)malloc((coarse_size - 1) * 4 * sizeof(bool));
+    memset(outcome, true, (coarse_size - 1) * 4 * sizeof(bool));
+    border_pixel << <4, coarse_size - 1>> > (hpin, vpin, coarse_size, temp, outcome);
 
-    // If all border's pixels have same color, return true
+    // If all border's pixels require same color, return true
+    bool res = true;
+    for (int i = 0; i < (coarse_size - 1) * 4 * sizeof(bool); i++)
+        if (!outcome[i]) {
+            res = false;
+            break;
+        }
+    free(outcome);
     *fill = temp;
-    return framed[MASK_COORDINATES(hpin, vpin)];
+    return res;
 }
 
-__global__ void border_pixel(const int hpin, const int vpin, const int coarse_size, byte fill) {
+__global__ void border_pixel(const int hpin, const int vpin, const int coarse_size, byte fill, bool *outcome) {
 
     // Early check if flag has already been flipped
-    if (!framed[MASK_COORDINATES(hpin, vpin)]) return; // TODO maybe is better without
+    // if (!*outcome) return; // TODO maybe is better with
 
     // Calculate coordinates of the pixel
     int h = hpin + (coarse_size - 1) * blockIdx.x == 0 + (threadIdx.x) * blockIdx.x % 2 == 1;
     int v = vpin + (coarse_size - 1) * blockIdx.x == 1 + (threadIdx.x) * blockIdx.x % 2 == 0;
 
     // Check pixel outcome
-    if (fill != compute_pixel(h, v)) framed[MASK_COORDINATES(hpin, vpin)] = false;
+    if (fill != compute_pixel(h, v)) *outcome = false;
 }
 
 __global__ void fill_block(const int hpin, const int vpin, const byte fill) {
@@ -372,7 +373,7 @@ __global__ void fill_block(const int hpin, const int vpin, const byte fill) {
     int v = blockIdx.y * blockDim.y + threadIdx.y + vpin;
 
     // Check boundaries and fill color
-    if (h < H_EXTENDED || v < V_EXTENDED)
+    if (h < H_EXTENDED || v < V_EXTENDED) 
         mask[MASK_COORDINATES(h, v)] = fill;
 }
 
