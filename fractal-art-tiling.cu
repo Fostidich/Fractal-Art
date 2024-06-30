@@ -18,7 +18,7 @@
 #define SHADOW_TILT_H -64 // horizontal offset from where shadow is plotted
 #define SHADOW_TILT_V 32 // vertical offset from where shadow is plotted
 #define SHADOW_INTENSITY 0.8 // blackness of the shadow
-#define BLOCK_DIM 16 // threads per block dimension
+#define BLOCK_DIM 26 // threads per block dimension
 #define OUT 0xFF // outside color of the fractal mask
 #define IN 0x00 // inside color of the fractal mask
 #define H_EXTENSION (abs(SHADOW_TILT_H) + SHADOW_DISTANCE) // horizontal extension due to shadow offset

@@ -13,12 +13,12 @@
 #define SCALE 2 // maximum X value in the fractal graph
 #define ITERATIONS (1 << 8) // number of iteration for checking divergence
 #define R 2 // ceiling upon which function is considered divergent
-#define SHADOW_DISTANCE 64 // radius of the circular shadow plot
+#define SHADOW_DISTANCE 16 // radius of the circular shadow plot
 #define SHADOW_SHARPNESS 1 // rapidity with which shadow gets dark
 #define SHADOW_TILT_H -64 // horizontal offset from where shadow is plotted
 #define SHADOW_TILT_V 32 // vertical offset from where shadow is plotted
 #define SHADOW_INTENSITY 0.8 // blackness of the shadow
-#define BLOCK_DIM 16 // threads per block dimension
+#define BLOCK_DIM 4 // threads per block dimension
 #define OUT 0xFF // outside color of the fractal mask
 #define IN 0x00 // inside color of the fractal mask
 #define H_EXTENSION (abs(SHADOW_TILT_H) + SHADOW_DISTANCE) // horizontal extension due to shadow offset
@@ -29,8 +29,10 @@
 #define SHADOW_COORDINATES(x, y) ((y) * H_EXTENDED + (x)) // linearized coordinates of shadow
 #define IMAGE_COORDINATES(x, y) ((y) * H_RES + (x)) // linearized coordinates of images
 #define SLICES (2 * (SHADOW_DISTANCE + BLOCK_DIM - 1) / BLOCK_DIM + 1) // number of slices needed to avoid memory collisions
-#define COARSE_BLOCK (1 << 12) // pixel block dimension assigned to a single thread in the first iteration
+#define COARSE_BLOCK (1 << 8) // pixel block dimension assigned to a single thread in the first iteration
 #define COARSE_FACTOR (1 << 4) // division factor on pixel block size at each coarsening iteration
+
+// TODO divide block dims for each kernel
 
 /// Compile time check that coarse block is a power of coarse factor
 constexpr int log2(int x) { return x == 1 ? 0 : 1 + log2(x / 2); }
@@ -330,6 +332,13 @@ __device__ bool common_border(const int hpin, const int vpin, const int coarse_s
 
     // TODO try computing vertices before full sides
 
+    // Check if other vertices have the same color
+    if (
+        temp != compute_pixel(hpin + coarse_size - 1, vpin + coarse_size - 1, false) ||
+        temp != compute_pixel(hpin + coarse_size - 1, vpin, false) ||
+        temp != compute_pixel(hpin, vpin + coarse_size - 1, false)
+        ) return false;
+
     // Check block side pixels
     bool *outcome = (bool *)malloc(sizeof(bool));
     *outcome = true;
@@ -344,8 +353,6 @@ __device__ bool common_border(const int hpin, const int vpin, const int coarse_s
 }
 
 __global__ void border_pixel(const int hpin, const int vpin, const int coarse_size, byte fill, bool *outcome) {
-
-    // TODO try early check if flag has already been flipped
 
     // Calculate coordinates of the pixel
     int h = hpin + (coarse_size - 1) * (blockIdx.x == 0) + threadIdx.x * ((blockIdx.x % 2) == 1);
