@@ -18,6 +18,16 @@
 #define SHADOW_TILT_V 32 // vertical offset from where shadow is plotted
 #define SHADOW_INTENSITY 0.8 // blackness of the shadow
 #define BLOCK_DIM 16 // threads per block dimension
+#define OUT 0xFF // outside color of the fractal mask
+#define IN 0x00 // inside color of the fractal mask
+#define H_EXTENSION (abs(SHADOW_TILT_H) + SHADOW_DISTANCE) // horizontal extension due to shadow offset
+#define V_EXTENSION (abs(SHADOW_TILT_V) + SHADOW_DISTANCE) // vertical extension due to shadow offset
+#define H_EXTENDED (H_RES + 2 * H_EXTENSION) // required vertical dimension due to shadow offset
+#define V_EXTENDED (V_RES + 2 * V_EXTENSION) // required horizontal dimension due to shadow offset
+#define MASK_COORDINATES(x, y) ((y) * H_EXTENDED + (x)) // linearized coordinates of mask
+#define SHADOW_COORDINATES(x, y) ((y) * H_EXTENDED + (x)) // linearized coordinates of shadow
+#define IMAGE_COORDINATES(x, y) ((y) * H_RES + (x)) // linearized coordinates of images
+#define SLICES (2 * (SHADOW_DISTANCE + BLOCK_DIM - 1) / BLOCK_DIM + 1) // number of slices needed to avoid memory collisions
 
 typedef unsigned char byte;
 typedef struct complex {
@@ -37,6 +47,34 @@ typedef struct complex {
 
 /// Calculate fractal and shadow for each pixel point and assign images respectively
 __host__ void generate_art(const complex *c, byte *image, const byte *inside, const byte *outside);
+
+/// The first iteration generates a black and white image (mask) where
+/// pixels inside (divergent) the fractal are black and pixels outside
+/// (convergent) are white.
+__global__ void compute_mask(
+    const complex c,
+    byte *__restrict__ mask);
+
+/// The second iteration plots a circular shadow for each outside pixel of
+/// the just generated fractal mask.
+/// This is done by adding one to the corresponding elements of the shadow
+/// integer array (sized like fractal mask).
+/// The higher is the number, the higher is the shadow intensity.
+__global__ void apply_shadow(
+    const int h_slice,
+    const int v_slice,
+    const byte *__restrict__ mask,
+    int *__restrict__ shadow);
+
+/// The third iteration assigns the inside and the outside images.
+/// The shadow toner for the inner image is computed starting from the corresponding
+/// value in the shadow array.
+__global__ void assign_final(
+    const int *__restrict__ shadow,
+    const byte *__restrict__ mask,
+    const byte *__restrict__ inside,
+    const byte *__restrict__ outside,
+    byte *__restrict__ image);
 
 /// Complex multiplication
 __device__ void cmul(complex *outcome, const complex *first, const complex *second);
@@ -97,45 +135,6 @@ int main(int argc, char **argv) {
     free(outside);
     return 0;
 }
-
-#define OUT 0xFF // outside color of the fractal mask
-#define IN 0x00 // inside color of the fractal mask
-#define H_EXTENSION (abs(SHADOW_TILT_H) + SHADOW_DISTANCE) // horizontal extension due to shadow offset
-#define V_EXTENSION (abs(SHADOW_TILT_V) + SHADOW_DISTANCE) // vertical extension due to shadow offset
-#define H_EXTENDED (H_RES + 2 * H_EXTENSION) // required vertical dimension due to shadow offset
-#define V_EXTENDED (V_RES + 2 * V_EXTENSION) // required horizontal dimension due to shadow offset
-#define MASK_COORDINATES(x, y) ((y) * H_EXTENDED + (x)) // linearized coordinates of mask
-#define SHADOW_COORDINATES(x, y) ((y) * H_EXTENDED + (x)) // linearized coordinates of shadow
-#define IMAGE_COORDINATES(x, y) ((y) * H_RES + (x)) // linearized coordinates of images
-#define SLICES (2 * (SHADOW_DISTANCE + BLOCK_DIM - 1) / BLOCK_DIM + 1) // number of slices needed to avoid memory collisions
-
-/// The first iteration generates a black and white image (mask) where
-/// pixels inside (divergent) the fractal are black and pixels outside
-/// (convergent) are white.
-__global__ void compute_mask(
-    const complex c,
-    byte *__restrict__ mask);
-
-/// The second iteration plots a circular shadow for each outside pixel of
-/// the just generated fractal mask.
-/// This is done by adding one to the corresponding elements of the shadow
-/// integer array (sized like fractal mask).
-/// The higher is the number, the higher is the shadow intensity.
-__global__ void apply_shadow(
-    const int h_slice,
-    const int v_slice,
-    const byte *__restrict__ mask,
-    int *__restrict__ shadow);
-
-/// The third iteration assigns the inside and the outside images.
-/// The shadow toner for the inner image is computed starting from the corresponding
-/// value in the shadow array.
-__global__ void assign_final(
-    const int *__restrict__ shadow,
-    const byte *__restrict__ mask,
-    const byte *__restrict__ inside,
-    const byte *__restrict__ outside,
-    byte *__restrict__ image);
 
 __host__ void generate_art(const complex *c, byte *image, const byte *inside, const byte *outside) {
 

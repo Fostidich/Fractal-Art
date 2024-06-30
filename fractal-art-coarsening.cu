@@ -19,6 +19,22 @@
 #define SHADOW_TILT_V 32 // vertical offset from where shadow is plotted
 #define SHADOW_INTENSITY 0.8 // blackness of the shadow
 #define BLOCK_DIM 16 // threads per block dimension
+#define OUT 0xFF // outside color of the fractal mask
+#define IN 0x00 // inside color of the fractal mask
+#define H_EXTENSION (abs(SHADOW_TILT_H) + SHADOW_DISTANCE) // horizontal extension due to shadow offset
+#define V_EXTENSION (abs(SHADOW_TILT_V) + SHADOW_DISTANCE) // vertical extension due to shadow offset
+#define H_EXTENDED (H_RES + 2 * H_EXTENSION) // required vertical dimension due to shadow offset
+#define V_EXTENDED (V_RES + 2 * V_EXTENSION) // required horizontal dimension due to shadow offset
+#define MASK_COORDINATES(x, y) ((y) * H_EXTENDED + (x)) // linearized coordinates of mask
+#define SHADOW_COORDINATES(x, y) ((y) * H_EXTENDED + (x)) // linearized coordinates of shadow
+#define IMAGE_COORDINATES(x, y) ((y) * H_RES + (x)) // linearized coordinates of images
+#define SLICES (2 * (SHADOW_DISTANCE + BLOCK_DIM - 1) / BLOCK_DIM + 1) // number of slices needed to avoid memory collisions
+#define COARSE_BLOCK (1 << 12) // pixel block dimension assigned to a single thread in the first iteration
+#define COARSE_FACTOR (1 << 4) // division factor on pixel block size at each coarsening iteration
+
+/// Compile time check that coarse block is a power of coarse factor
+constexpr int log2(int x) { return x == 1 ? 0 : 1 + log2(x / 2); }
+static_assert(log2(COARSE_BLOCK) % log2(COARSE_FACTOR) == 0, "coarsening: block must be power of factor");
 
 typedef unsigned char byte;
 typedef struct complex {
@@ -38,6 +54,53 @@ typedef struct complex {
 
 /// Calculate fractal and shadow for each pixel point and assign images respectively
 __host__ void generate_art(const complex *c_param, byte *image, const byte *inside, const byte *outside);
+
+/// The first iteration generates a black and white image (mask) where
+/// pixels inside (divergent) the fractal are black and pixels outside
+/// (convergent) are white.
+__global__ void compute_mask(
+    const int hpin,
+    const int vpin,
+    const int coarse_size);
+
+/// Fractal value is computed on the pixel coordinates provided. Mask may be then updated accordingly.
+__device__ byte compute_pixel(const int h, const int v, const bool update);
+
+/// Coarse block border is computed, and if color is equal to all pixels, return true.
+__device__ bool common_border(const int hpin, const int vpin, const int coarse_size, byte *fill);
+
+/// When checking if the pixels in the border of a block have same value, that is done in parallel
+__global__ void border_pixel(const int hpin, const int vpin, const int coarse_size, byte fill, bool *outcome);
+
+/// If block has same value for each pixel in the border, color is filled all together
+__global__ void fill_block(const int hpin, const int vpin, const byte fill);
+
+/// The second iteration plots a circular shadow for each outside pixel of
+/// the just generated fractal mask.
+/// This is done by adding one to the corresponding elements of the shadow
+/// integer array (sized like fractal mask).
+/// The higher is the number, the higher is the shadow intensity.
+__global__ void apply_shadow(
+    const int h_slice,
+    const int v_slice,
+    const byte *__restrict__ mask,
+    int *__restrict__ shadow);
+
+/// The third iteration assigns the inside and the outside images.
+/// The shadow toner for the inner image is computed starting from the corresponding
+/// value in the shadow array.
+__global__ void assign_final(
+    const int *__restrict__ shadow,
+    const byte *__restrict__ mask,
+    const byte *__restrict__ inside,
+    const byte *__restrict__ outside,
+    byte *__restrict__ image);
+
+/// Constant c value of fractal function
+__constant__ complex c;
+
+/// Mask address global value used to avoid useless parameter passing in recursive kernel
+__device__ byte *mask;
 
 /// Complex multiplication
 __device__ void cmul(complex *outcome, const complex *first, const complex *second);
@@ -98,58 +161,6 @@ int main(int argc, char **argv) {
     free(outside);
     return 0;
 }
-
-#define OUT 0xFF // outside color of the fractal mask
-#define IN 0x00 // inside color of the fractal mask
-#define H_EXTENSION (abs(SHADOW_TILT_H) + SHADOW_DISTANCE) // horizontal extension due to shadow offset
-#define V_EXTENSION (abs(SHADOW_TILT_V) + SHADOW_DISTANCE) // vertical extension due to shadow offset
-#define H_EXTENDED (H_RES + 2 * H_EXTENSION) // required vertical dimension due to shadow offset
-#define V_EXTENDED (V_RES + 2 * V_EXTENSION) // required horizontal dimension due to shadow offset
-#define MASK_COORDINATES(x, y) ((y) * H_EXTENDED + (x)) // linearized coordinates of mask
-#define SHADOW_COORDINATES(x, y) ((y) * H_EXTENDED + (x)) // linearized coordinates of shadow
-#define IMAGE_COORDINATES(x, y) ((y) * H_RES + (x)) // linearized coordinates of images
-#define SLICES (2 * (SHADOW_DISTANCE + BLOCK_DIM - 1) / BLOCK_DIM + 1) // number of slices needed to avoid memory collisions
-#define COARSE_BLOCK (1 << 12) // pixel block dimension assigned to a single thread in the first iteration
-#define COARSE_FACTOR (1 << 4) // division factor on pixel block size at each coarsening iteration
-
-/// Compile time check that coarse block is a power of coarse factor
-constexpr int log2(int x) { return x == 1 ? 0 : 1 + log2(x / 2); }
-static_assert(log2(COARSE_BLOCK) % log2(COARSE_FACTOR) == 0, "coarsening: block must be power of factor");
-
-/// The first iteration generates a black and white image (mask) where
-/// pixels inside (divergent) the fractal are black and pixels outside
-/// (convergent) are white.
-__global__ void compute_mask(
-    const int hpin,
-    const int vpin,
-    const int coarse_size);
-
-/// The second iteration plots a circular shadow for each outside pixel of
-/// the just generated fractal mask.
-/// This is done by adding one to the corresponding elements of the shadow
-/// integer array (sized like fractal mask).
-/// The higher is the number, the higher is the shadow intensity.
-__global__ void apply_shadow(
-    const int h_slice,
-    const int v_slice,
-    const byte *__restrict__ mask,
-    int *__restrict__ shadow);
-
-/// The third iteration assigns the inside and the outside images.
-/// The shadow toner for the inner image is computed starting from the corresponding
-/// value in the shadow array.
-__global__ void assign_final(
-    const int *__restrict__ shadow,
-    const byte *__restrict__ mask,
-    const byte *__restrict__ inside,
-    const byte *__restrict__ outside,
-    byte *__restrict__ image);
-
-/// Constant c value of fractal function
-__constant__ complex c;
-
-/// Mask address global value used to avoid useless parameter passing in recursive kernel
-__device__ byte *mask;
 
 __host__ void generate_art(const complex *c_param, byte *image, const byte *inside, const byte *outside) {
 
@@ -243,15 +254,6 @@ __host__ void generate_art(const complex *c_param, byte *image, const byte *insi
     cudaEventDestroy(stop);
 }
 
-/// Fractal value is computed on the pixel coordinates provided. Mask is then updated accordingly.
-__device__ byte compute_pixel(const int h, const int v, const bool update);
-
-/// Coarse block border is computed, and if color is equal to all pixels, return true.
-__device__ bool common_border(const int hpin, const int vpin, const int coarse_size, byte *fill);
-
-/// If block has same value for each pixel in the border, color is filled all together
-__global__ void fill_block(const int hpin, const int vpin, const byte fill);
-
 __global__ void compute_mask(
     const int hpin,
     const int vpin,
@@ -320,9 +322,6 @@ __device__ byte compute_pixel(const int h, const int v, const bool update) {
 
 #undef RES_UNIT
 }
-
-/// When checking if the pixels in the border of a block have same value, that is done in parallel
-__global__ void border_pixel(const int hpin, const int vpin, const int coarse_size, byte fill, bool *outcome);
 
 __device__ bool common_border(const int hpin, const int vpin, const int coarse_size, byte *fill) {
 
