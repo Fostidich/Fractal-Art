@@ -109,8 +109,8 @@ int main(int argc, char **argv) {
 #define SHADOW_COORDINATES(x, y) ((y) * H_EXTENDED + (x)) // linearized coordinates of shadow
 #define IMAGE_COORDINATES(x, y) ((y) * H_RES + (x)) // linearized coordinates of images
 #define SLICES (2 * (SHADOW_DISTANCE + BLOCK_DIM - 1) / BLOCK_DIM + 1) // number of slices needed to avoid memory collisions
-#define COARSE_BLOCK (1 << 8) // pixel block dimension assigned to a single thread in the first iteration
-#define COARSE_FACTOR (1 << 2) // division factor on pixel block size at each coarsening iteration
+#define COARSE_BLOCK (1 << 12) // pixel block dimension assigned to a single thread in the first iteration
+#define COARSE_FACTOR (1 << 4) // division factor on pixel block size at each coarsening iteration
 
 /// Compile time check that coarse block is a power of coarse factor
 constexpr int log2(int x) { return x == 1 ? 0 : 1 + log2(x / 2); }
@@ -244,7 +244,7 @@ __host__ void generate_art(const complex *c_param, byte *image, const byte *insi
 }
 
 /// Fractal value is computed on the pixel coordinates provided. Mask is then updated accordingly.
-__device__ byte compute_pixel(const int h, const int v);
+__device__ byte compute_pixel(const int h, const int v, const bool update);
 
 /// Coarse block border is computed, and if color is equal to all pixels, return true.
 __device__ bool common_border(const int hpin, const int vpin, const int coarse_size, byte *fill);
@@ -266,12 +266,12 @@ __global__ void compute_mask(
     if (coarse_size == 1) {
 
         // Coarse block is minimal size, i.e. each thread computes one pixel
-        compute_pixel(h, v);
+        compute_pixel(h, v, true);
 
     } else if (common_border(h, v, coarse_size, &fill)) {
 
         // Coarse block has the same outcome for each pixel inside
-        dim3 block_size(BLOCK_DIM, BLOCK_DIM);
+        dim3 block_size(BLOCK_DIM, BLOCK_DIM); // TODO what about this block size
         dim3 grid_size(
             ceil((float)coarse_size / block_size.x),
             ceil((float)coarse_size / block_size.y));
@@ -280,14 +280,14 @@ __global__ void compute_mask(
     } else {
 
         // Coarse block has heterogenous computation efforts
-        dim3 block_size(COARSE_FACTOR, COARSE_FACTOR);
+        dim3 block_size(COARSE_FACTOR, COARSE_FACTOR); // TODO what about this block size
         dim3 grid_size(1, 1);
         compute_mask << <grid_size, block_size >> > (h, v, coarse_size / COARSE_FACTOR);
 
     }
 }
 
-__device__ byte compute_pixel(const int h, const int v) {
+__device__ byte compute_pixel(const int h, const int v, const bool update) {
 #define RES_UNIT ((double)SCALE / (H_RES / 2)) // side length of a pixel in the complex plane
 
     // Check boundaries
@@ -311,7 +311,7 @@ __device__ byte compute_pixel(const int h, const int v) {
         if (cmod(&z0) > R) {
 
             // Assign outside value
-            mask[MASK_COORDINATES(h, v)] = OUT;
+            if (update) mask[MASK_COORDINATES(h, v)] = OUT;
             return OUT;
         }
     }
@@ -327,55 +327,33 @@ __global__ void border_pixel(const int hpin, const int vpin, const int coarse_si
 __device__ bool common_border(const int hpin, const int vpin, const int coarse_size, byte *fill) {
 
     // Calculate color for first pixel
-    byte temp = compute_pixel(hpin, vpin);
+    byte temp = compute_pixel(hpin, vpin, false);
 
-    // Check if other vertices have the same color
-    // if ( // TODO maybe compute here alone
-    //     temp != compute_pixel(hpin + coarse_size - 1, vpin + coarse_size - 1) ||
-    //     temp != compute_pixel(hpin + coarse_size - 1, vpin) ||
-    //     temp != compute_pixel(hpin, vpin + coarse_size - 1)
-    //     ) return false;
+    // TODO try computing vertices before full sides
 
     // Check block side pixels
     bool *outcome = (bool *)malloc(sizeof(bool));
     *outcome = true;
     border_pixel << <4, coarse_size - 1>> > (hpin, vpin, coarse_size, temp, outcome);
+    cudaDeviceSynchronize();
 
     // If all border's pixels require same color, return true
     bool res = *outcome;
     free(outcome);
     *fill = temp;
     return res;
-
-    // // Check block side pixels
-    // bool outcome = true;
-    // for (int b = 0; b < 4; b++)
-    //     for (int t = 0; t < coarse_size - 1; t++) {
-
-    //         // Calculate coordinates of the pixel
-    //         int h = hpin + (coarse_size - 1) * (b == 0) + t * (b % 2 == 1);
-    //         int v = vpin + (coarse_size - 1) * (b == 1) + t * (b % 2 == 0);
-
-    //         // Check pixel outcome
-    //         if (temp != compute_pixel(h, v)) outcome = false;
-    //     }
-
-    // // If all border's pixels require same color, return true
-    // *fill = temp;
-    // return outcome;
 }
 
 __global__ void border_pixel(const int hpin, const int vpin, const int coarse_size, byte fill, bool *outcome) {
 
-    // Early check if flag has already been flipped
-    // if (!*outcome) return; // TODO maybe is better with
+    // TODO try early check if flag has already been flipped
 
     // Calculate coordinates of the pixel
-    int h = hpin + (coarse_size - 1) * (blockIdx.x == 0) + threadIdx.x * (blockIdx.x % 2 == 1);
-    int v = vpin + (coarse_size - 1) * (blockIdx.x == 1) + threadIdx.x * (blockIdx.x % 2 == 0);
+    int h = hpin + (coarse_size - 1) * (blockIdx.x == 0) + threadIdx.x * ((blockIdx.x % 2) == 1);
+    int v = vpin + (coarse_size - 1) * (blockIdx.x == 1) + threadIdx.x * ((blockIdx.x % 2) == 0);
 
     // Check pixel outcome
-    if (fill != compute_pixel(h, v)) *outcome = false;
+    if (fill != compute_pixel(h, v, false)) *outcome = false;
 }
 
 __global__ void fill_block(const int hpin, const int vpin, const byte fill) {
