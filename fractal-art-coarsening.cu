@@ -13,13 +13,13 @@
 #define SCALE 2 // maximum X value in the fractal graph
 #define ITERATIONS (1 << 8) // number of iteration for checking divergence
 #define R 2 // ceiling upon which function is considered divergent
-#define SHADOW_DISTANCE 32 // radius of the circular shadow plot
+#define SHADOW_DISTANCE 64 // radius of the circular shadow plot
 #define SHADOW_SHARPNESS 1 // rapidity with which shadow gets dark
 #define SHADOW_TILT_H -64 // horizontal offset from where shadow is plotted
 #define SHADOW_TILT_V 32 // vertical offset from where shadow is plotted
 #define SHADOW_INTENSITY 0.8 // blackness of the shadow
 #define BLOCK_DIM_CM 4 // threads per block dimension (compute mask kernel)
-#define BLOCK_DIM_AS 8 // threads per block dimension (apply shadow kernel)
+#define BLOCK_DIM_AS 16 // threads per block dimension (apply shadow kernel)
 #define BLOCK_DIM_AF 16 // threads per block dimension (assign final kernel)
 #define OUT 0xFF // outside color of the fractal mask
 #define IN 0x00 // inside color of the fractal mask
