@@ -13,12 +13,14 @@
 #define SCALE 2 // maximum X value in the fractal graph
 #define ITERATIONS (1 << 8) // number of iteration for checking divergence
 #define R 2 // ceiling upon which function is considered divergent
-#define SHADOW_DISTANCE 16 // radius of the circular shadow plot
+#define SHADOW_DISTANCE 32 // radius of the circular shadow plot
 #define SHADOW_SHARPNESS 1 // rapidity with which shadow gets dark
 #define SHADOW_TILT_H -64 // horizontal offset from where shadow is plotted
 #define SHADOW_TILT_V 32 // vertical offset from where shadow is plotted
 #define SHADOW_INTENSITY 0.8 // blackness of the shadow
-#define BLOCK_DIM 4 // threads per block dimension
+#define BLOCK_DIM_CM 4 // threads per block dimension (compute mask kernel)
+#define BLOCK_DIM_AS 8 // threads per block dimension (apply shadow kernel)
+#define BLOCK_DIM_AF 16 // threads per block dimension (assign final kernel)
 #define OUT 0xFF // outside color of the fractal mask
 #define IN 0x00 // inside color of the fractal mask
 #define H_EXTENSION (abs(SHADOW_TILT_H) + SHADOW_DISTANCE) // horizontal extension due to shadow offset
@@ -28,12 +30,10 @@
 #define MASK_COORDINATES(x, y) ((y) * H_EXTENDED + (x)) // linearized coordinates of mask
 #define SHADOW_COORDINATES(x, y) ((y) * H_EXTENDED + (x)) // linearized coordinates of shadow
 #define IMAGE_COORDINATES(x, y) ((y) * H_RES + (x)) // linearized coordinates of images
-#define SLICES (2 * (SHADOW_DISTANCE + BLOCK_DIM - 1) / BLOCK_DIM + 1) // number of slices needed to avoid memory collisions
+#define SLICES (2 * (SHADOW_DISTANCE + BLOCK_DIM_AS - 1) / BLOCK_DIM_AS + 1) // number of slices needed to avoid memory collisions
 #define COARSE_BLOCK (1 << 8) // pixel block dimension assigned to a single thread in the first iteration
 #define COARSE_FACTOR (1 << 4) // division factor on pixel block size at each coarsening iteration
 #define COARSE_THRESHOLD (1 << 4) // minimum coarse block dimension before full independent pixel computations
-
-// TODO divide block dims for each kernel
 
 /// Compile time check that coarse block is a power of coarse factor
 constexpr int log2(int x) { return x == 1 ? 0 : 1 + log2(x / 2); }
@@ -200,10 +200,10 @@ __host__ void generate_art(const complex *c_param, byte *image, const byte *insi
     printf("Memory transfer to device: %f\n", stop_ms - start_ms);
 
     dim3 block_size, grid_size;
-    block_size = dim3(BLOCK_DIM, BLOCK_DIM);
 
     // For each pixel compute fractal mask
     cudaEventRecord(start);
+    block_size = dim3(BLOCK_DIM_CM, BLOCK_DIM_CM);
     grid_size = dim3(
         ceil((float)H_EXTENDED / block_size.x / COARSE_BLOCK),
         ceil((float)V_EXTENDED / block_size.y / COARSE_BLOCK));
@@ -216,6 +216,7 @@ __host__ void generate_art(const complex *c_param, byte *image, const byte *insi
 
     // For each pixel compute shadow value
     cudaEventRecord(start);
+    block_size = dim3(BLOCK_DIM_AS, BLOCK_DIM_AS);
     for (int i = 0; i < SLICES; i++)
         for (int j = 0; j < SLICES; j++) {
             grid_size = dim3(
@@ -232,6 +233,7 @@ __host__ void generate_art(const complex *c_param, byte *image, const byte *insi
 
     // For each pixel select final image, computing its shadow
     cudaEventRecord(start);
+    block_size = dim3(BLOCK_DIM_AF, BLOCK_DIM_AF);
     grid_size = dim3(
         ceil((float)H_RES / block_size.x),
         ceil((float)V_RES / block_size.y));
@@ -274,26 +276,28 @@ __global__ void compute_mask(
     if (common_border(h, v, coarse_size, &fill)) {
 
         // Coarse block has the same outcome for each pixel inside
-        dim3 block_size(BLOCK_DIM, BLOCK_DIM); // TODO what about this block size
+        dim3 block_size(8, 8);
         dim3 grid_size(
-            ceil((float)coarse_size / block_size.x),
-            ceil((float)coarse_size / block_size.y));
+            coarse_size / block_size.x,
+            coarse_size / block_size.y);
         fill_block << <grid_size, block_size >> > (h, v, fill);
 
     } else if (coarse_size <= COARSE_THRESHOLD) {
 
         // Coarse block is minimal size, i.e. pixel are processed independently
-        dim3 block_size(BLOCK_DIM, BLOCK_DIM); // TODO what about this block size
+        dim3 block_size(8, 8);
         dim3 grid_size(
-            ceil((float)coarse_size / block_size.x),
-            ceil((float)coarse_size / block_size.y));
+            coarse_size / block_size.x,
+            coarse_size / block_size.y);
         compute_block << <grid_size, block_size >> > (h, v);
 
     } else {
 
         // Coarse block has heterogenous computation efforts
-        dim3 block_size(COARSE_FACTOR, COARSE_FACTOR); // TODO what about this block size
-        dim3 grid_size(1, 1);
+        dim3 block_size(4, 4);
+        dim3 grid_size(
+            COARSE_FACTOR / block_size.x,
+            COARSE_FACTOR / block_size.y);
         compute_mask << <grid_size, block_size >> > (h, v, coarse_size / COARSE_FACTOR);
 
     }
@@ -395,7 +399,7 @@ __global__ void apply_shadow(
     const int v_slice,
     const byte *__restrict__ mask,
     int *__restrict__ shadow) {
-#define SHADOW_TILE_DIM (BLOCK_DIM + 2 * SHADOW_DISTANCE) // shared shadow matrix side length
+#define SHADOW_TILE_DIM (BLOCK_DIM_AS + 2 * SHADOW_DISTANCE) // shared shadow matrix side length
 
     // Calculate coordinates of the pixel
     int h = (SLICES * blockIdx.x + h_slice) * blockDim.x + threadIdx.x;
@@ -403,8 +407,8 @@ __global__ void apply_shadow(
 
     // Allocate and intialize shared space
     __shared__ unsigned short shadow_tile[SHADOW_TILE_DIM][SHADOW_TILE_DIM];
-    for (int i = threadIdx.x; i < SHADOW_TILE_DIM; i += BLOCK_DIM)
-        for (int j = threadIdx.y; j < SHADOW_TILE_DIM; j += BLOCK_DIM)
+    for (int i = threadIdx.x; i < SHADOW_TILE_DIM; i += BLOCK_DIM_AS)
+        for (int j = threadIdx.y; j < SHADOW_TILE_DIM; j += BLOCK_DIM_AS)
             shadow_tile[i][j] = 0;
 
     // Check boundaries and ignore points in the image below
@@ -425,8 +429,8 @@ __global__ void apply_shadow(
     __syncthreads();
 
     // Update global memory with shadow values
-    for (int i = threadIdx.x; i < SHADOW_TILE_DIM; i += BLOCK_DIM)
-        for (int j = threadIdx.y; j < SHADOW_TILE_DIM; j += BLOCK_DIM) {
+    for (int i = threadIdx.x; i < SHADOW_TILE_DIM; i += BLOCK_DIM_AS)
+        for (int j = threadIdx.y; j < SHADOW_TILE_DIM; j += BLOCK_DIM_AS) {
             int x = h - threadIdx.x - SHADOW_DISTANCE + i;
             int y = v - threadIdx.y - SHADOW_DISTANCE + j;
             if (x >= 0 && x < H_EXTENDED && y >= 0 && y < V_EXTENDED)
