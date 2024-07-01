@@ -1,42 +1,41 @@
 #!/bin/bash
 
+cd Fractal-Art
 theta=0
 rad=0.7885
 prev_steps=180
-incr=$(echo "scale=10; 2 * 3.14159265359 / $prev_steps" | bc -l)
+incr=$(awk 'BEGIN { printf "%.10f", 2 * 3.14159265359 / '"$prev_steps"' }')
 prog_start=$(date +%s.%N)
-rm -r fracs 2>>/dev/null
-mkdir fracs 2>>/dev/null
+rm -r frames 2>>/dev/null
+mkdir frames 2>>/dev/null
 echo "Starting frames generation"
 echo
 
-for (( i=0; $(echo "scale=10; $theta < 2 * 3.14159265359" | bc -l); i++ )); do
-	real=$(echo "scale=10; $rad * c($theta)" | bc -l)
-	imag=$(echo "scale=10; $rad * s($theta)" | bc -l)
-	perc=$(echo "scale=2; 100 * $theta / (2 * 3.14159265359)" | bc -l | \
-		awk '{printf("%.2f", $1)}')
-	prog_now=$(date +%s.%N)
-	prog=$(echo "scale=2; $prog_now - $prog_start" | bc -l | \
-		awk '{printf("%.2f", $1)}')
-	echo "FRAME $i: $prog sec, $perc%"
+for (( i=0; $(awk 'BEGIN { printf "%d", ('$theta' < 2 * 3.14159265359) }'); i++ )); do
+    real=$(awk 'BEGIN { printf "%.10f", '"$rad"' * cos('"$theta"') }')
+    imag=$(awk 'BEGIN { printf "%.10f", '"$rad"' * sin('"$theta"') }')
+    perc=$(awk 'BEGIN { printf "%.2f", 100 * '"$theta"' / (2 * 3.14159265359) }')
+    prog_now=$(date +%s.%N)
+    prog=$(awk 'BEGIN { printf "%.2f", '"$prog_now"' - '"$prog_start"' }')
+    echo "FRAME $i: $prog sec, $perc%"
 
-	start_time=$(date +%s.%N)
-	./fractal "$real" "$imag"
-	end_time=$(date +%s.%N)
+    start_time=$(date +%s.%N)
+    ./a.out "$real" "$imag"
+    end_time=$(date +%s.%N)
 
-	ffmpeg -i fractal.ppm "fracs/fractal$(printf "%04d" $i).png" 2>>/dev/null
-	elapsed_time=$(echo "$end_time - $start_time" | bc -l)
-	step=$(echo "scale=10; $incr / $elapsed_time" | bc -l)
+    ffmpeg -i fractal.ppm "frames/fractal$(printf "%04d" $i).png" 2>>/dev/null
+    elapsed_time=$(awk 'BEGIN { printf "%.10f", '"$end_time"' - '"$start_time"' }')
+    step=$(awk 'BEGIN { printf "%.10f", '"$incr"' / '"$elapsed_time"' }')
 
-	theta=$(echo "scale=10; $theta + $step" | bc -l)
-	echo "Elapsed time: $elapsed_time"
-	echo "Increasing step: $step"
-	echo
+    theta=$(awk 'BEGIN { printf "%.10f", '"$theta"' + '"$step"' }')
+    echo "Elapsed time: $elapsed_time"
+    echo "Increasing step: $step"
+    echo
 done
 
 echo "Frames generation finished"
 echo
 echo -n "Generating video from frames... "
 rm fractalvideo.mp4 2>>/dev/null
-ffmpeg -framerate 30 -i fracs/fractal%04d.png -c:v libx264 -pix_fmt yuv420p fractalvideo.mp4 2>>/dev/null
+ffmpeg -framerate 30 -i frames/fractal%04d.png -c:v libx264 -pix_fmt yuv420p fractalvideo.mp4 2>>/dev/null
 echo "done!"

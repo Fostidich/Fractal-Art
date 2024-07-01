@@ -1,6 +1,7 @@
 .idea
 .vscode
 .DS_Store
+frames
 *.out
 *.ncu-rep
 *.nsys-rep
