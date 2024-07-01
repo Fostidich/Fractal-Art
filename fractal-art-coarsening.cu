@@ -19,7 +19,7 @@
 #define SHADOW_TILT_V 32 // vertical offset from where shadow is plotted
 #define SHADOW_INTENSITY 0.8 // blackness of the shadow
 #define BLOCK_DIM_CM 4 // threads per block dimension (compute mask kernel)
-#define BLOCK_DIM_AS 16 // threads per block dimension (apply shadow kernel)
+#define BLOCK_DIM_AS 26 // threads per block dimension (apply shadow kernel)
 #define BLOCK_DIM_AF 16 // threads per block dimension (assign final kernel)
 #define OUT 0xFF // outside color of the fractal mask
 #define IN 0x00 // inside color of the fractal mask
