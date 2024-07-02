@@ -35,9 +35,16 @@
 #define COARSE_FACTOR (1 << 4) // division factor on pixel block size at each coarsening iteration
 #define COARSE_THRESHOLD (1 << 4) // minimum coarse block dimension before full independent pixel computations
 
-/// Compile time check that coarse block is a power of coarse factor
-constexpr int log2(int x) { return x == 1 ? 0 : 1 + log2(x / 2); }
-static_assert(log2(COARSE_BLOCK) % log2(COARSE_FACTOR) == 0, "coarsening: block must be power of factor");
+/// Compile time check that a corse size smaller than threshold can be reached
+constexpr int log2(int x) {
+    return x == 1 ? 0 : 1 + log2(x / 2);
+}
+constexpr bool check_coarsening(int block, int factor, int threshold) {
+    return (block <= threshold) || ((block % factor == 0) && check_coarsening(block / factor, factor, threshold));
+}
+static_assert(check_coarsening(COARSE_BLOCK, COARSE_FACTOR, COARSE_THRESHOLD),
+              "Coarsening: block size must eventually be less than or equal to the threshold.");
+
 
 typedef unsigned char byte;
 typedef struct complex {
