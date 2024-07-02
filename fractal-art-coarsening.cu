@@ -129,8 +129,8 @@ double milliseconds();
 int main(int argc, char **argv) {
 
     // Retrieve c constant from input args
-    if (argc != 3) {
-        printf("Provide a complex number");
+    if (argc <= 2) {
+        printf("Provide a complex number\n");
         return 1;
     }
     complex c;
@@ -142,15 +142,41 @@ int main(int argc, char **argv) {
     byte *inside = (byte *)malloc(3 * V_RES * H_RES * sizeof(byte));
     byte *outside = (byte *)malloc(3 * V_RES * H_RES * sizeof(byte));
 
-    // Load the two input images
-    if (load_image("inside.ppm", inside) < 0) {
-        fprintf(stderr, "Error opening %s\n", "inside.ppm");
-        return 1;
+    if (argc >= 5) {
+
+        // Retrive color values
+        byte colors[6];
+        char temp[3];
+        temp[2] = '\0';
+        for (int i = 0; i < 6; i++) {
+            temp[0] = argv[3 + i / 3][(i % 3) * 2];
+            temp[1] = argv[3 + i / 3][(i % 3) * 2 + 1];
+            colors[i] = (byte)strtoul(temp, NULL, 16);
+        }
+
+        // Load input colors as input images
+        for (int i = 0; i < V_RES * H_RES; i++)
+            for (int j = 0; j < 3; j++) {
+                inside[3 * i + j] = colors[j];
+                outside[3 * i + j] = colors[3 + j];
+            }
+
+
+    } else {
+
+        // Load the two input images
+        if (load_image("inside.ppm", inside) < 0) {
+            fprintf(stderr, "Error opening %s\n", "inside.ppm");
+            return 1;
+        }
+        if (load_image("outside.ppm", outside) < 0) {
+            fprintf(stderr, "Error opening %s\n", "outside.ppm");
+            return 1;
+        }
+
     }
-    if (load_image("outside.ppm", outside) < 0) {
-        fprintf(stderr, "Error opening %s\n", "outside.ppm");
-        return 1;
-    }
+
+
 
     // Compute fractal, shadow and image assignment
     generate_art(&c, image, inside, outside);

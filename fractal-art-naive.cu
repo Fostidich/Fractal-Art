@@ -95,7 +95,7 @@ int main(int argc, char **argv) {
 
     // Retrieve c constant from input args
     if (argc != 3) {
-        printf("Provide a complex number");
+        printf("Provide a complex number\n");
         return 1;
     }
     complex c;
