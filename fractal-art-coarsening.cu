@@ -31,9 +31,9 @@
 #define SHADOW_COORDINATES(x, y) ((y) * H_EXTENDED + (x)) // linearized coordinates of shadow
 #define IMAGE_COORDINATES(x, y) ((y) * H_RES + (x)) // linearized coordinates of images
 #define SLICES (2 * (SHADOW_DISTANCE + BLOCK_DIM_AS - 1) / BLOCK_DIM_AS + 1) // number of slices needed to avoid memory collisions
-#define COARSE_BLOCK (1 << 8) // pixel block dimension assigned to a single thread in the first iteration
+#define COARSE_BLOCK (1 << 9) // pixel block dimension assigned to a single thread in the first iteration
 #define COARSE_FACTOR (1 << 4) // division factor on pixel block size at each coarsening iteration
-#define COARSE_THRESHOLD (1 << 4) // minimum coarse block dimension before full independent pixel computations
+#define COARSE_THRESHOLD (1 << 5) // minimum coarse block dimension before full independent pixel computations
 
 /// Compile time check that a corse size smaller than threshold can be reached
 constexpr int log2(int x) { return x == 1 ? 0 : 1 + log2(x / 2); }
