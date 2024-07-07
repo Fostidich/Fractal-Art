@@ -163,7 +163,6 @@ int main(int argc, char **argv) {
                 outside[3 * i + j] = colors[3 + j];
             }
 
-
     } else {
 
         // Load the two input images
@@ -177,8 +176,6 @@ int main(int argc, char **argv) {
         }
 
     }
-
-
 
     // Compute fractal, shadow and image assignment
     generate_art(&c, image, inside, outside);
@@ -397,7 +394,8 @@ __global__ void border_pixel(const int hpin, const int vpin, const int coarse_si
     int v = vpin + (coarse_size - 1) * (blockIdx.x == 1) + threadIdx.x * ((blockIdx.x % 2) == 0);
 
     // Check pixel outcome
-    if (fill != compute_pixel(h, v, false)) *outcome = false;
+    if (fill != compute_pixel(h, v, false))
+        *outcome = false;
 }
 
 __global__ void fill_block(const int hpin, const int vpin, const byte fill) {
