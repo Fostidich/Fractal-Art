@@ -441,6 +441,7 @@ __global__ void apply_shadow(
     bool plot = h < H_EXTENDED && v < V_EXTENDED && mask[MASK_COORDINATES(h, v)] == OUT;
 
     // Plot a circular shadow
+    #pragma unroll
     for (int i = -SHADOW_DISTANCE; i <= SHADOW_DISTANCE; i++) {
         for (int j = -SHADOW_DISTANCE; j <= SHADOW_DISTANCE; j++) {
             __syncthreads();
@@ -455,6 +456,7 @@ __global__ void apply_shadow(
     __syncthreads();
 
     // Update global memory with shadow values
+    #pragma unroll
     for (int i = threadIdx.x; i < SHADOW_TILE_DIM; i += BLOCK_DIM_AS)
         for (int j = threadIdx.y; j < SHADOW_TILE_DIM; j += BLOCK_DIM_AS) {
             int x = h - threadIdx.x - SHADOW_DISTANCE + i;
