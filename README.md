@@ -14,4 +14,4 @@ The optimization steps are made in the following order:
 - slicing;
 - coarsening.
 
-###### C code written by Francesco Ostidich
+###### C/CUDA code written by Francesco Ostidich and Francesco Gangi
