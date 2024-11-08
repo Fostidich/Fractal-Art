@@ -170,7 +170,7 @@ __host__ void generate_art(const complex *c, byte *image, const byte *inside, co
     grid_size = dim3(
         ceil((float)H_EXTENDED / block_size.x),
         ceil((float)V_EXTENDED / block_size.y));
-    compute_mask << <grid_size, block_size >> > (*c, mask_d);
+    compute_mask<<<grid_size, block_size>>>(*c, mask_d);
     cudaEventRecord(stop);
     cudaDeviceSynchronize();
     CHECK_KERNELCALL;
@@ -182,7 +182,7 @@ __host__ void generate_art(const complex *c, byte *image, const byte *inside, co
     grid_size = dim3(
         ceil((float)H_EXTENDED / block_size.x),
         ceil((float)V_EXTENDED / block_size.y));
-    apply_shadow << <grid_size, block_size >> > (mask_d, shadow_d);
+    apply_shadow<<<grid_size, block_size>>>(mask_d, shadow_d);
     cudaEventRecord(stop);
     cudaDeviceSynchronize();
     CHECK_KERNELCALL;
@@ -194,7 +194,7 @@ __host__ void generate_art(const complex *c, byte *image, const byte *inside, co
     grid_size = dim3(
         ceil((float)H_RES / block_size.x),
         ceil((float)V_RES / block_size.y));
-    assign_final << <grid_size, block_size >> > (shadow_d, mask_d, inside_d, outside_d, image_d);
+    assign_final<<<grid_size, block_size>>>(shadow_d, mask_d, inside_d, outside_d, image_d);
     cudaEventRecord(stop);
     cudaDeviceSynchronize();
     CHECK_KERNELCALL;

@@ -232,7 +232,7 @@ __host__ void generate_art(const complex *c_param, byte *image, const byte *insi
     grid_size = dim3(
         ceil((float)H_EXTENDED / block_size.x / COARSE_BLOCK),
         ceil((float)V_EXTENDED / block_size.y / COARSE_BLOCK));
-    compute_mask << <grid_size, block_size >> > (0, 0, COARSE_BLOCK);
+    compute_mask<<<grid_size, block_size>>>(0, 0, COARSE_BLOCK);
     cudaEventRecord(stop);
     cudaDeviceSynchronize();
     CHECK_KERNELCALL;
@@ -247,7 +247,7 @@ __host__ void generate_art(const complex *c_param, byte *image, const byte *insi
             grid_size = dim3(
                 ceil((float)(round((float)H_EXTENDED / block_size.x) - i) / SLICES),
                 ceil((float)(round((float)V_EXTENDED / block_size.y) - j) / SLICES));
-            apply_shadow << <grid_size, block_size >> > (i, j, mask_d, shadow_d);
+            apply_shadow<<<grid_size, block_size>>>(i, j, mask_d, shadow_d);
             cudaDeviceSynchronize();
             CHECK_KERNELCALL;
         }
@@ -262,7 +262,7 @@ __host__ void generate_art(const complex *c_param, byte *image, const byte *insi
     grid_size = dim3(
         ceil((float)H_RES / block_size.x),
         ceil((float)V_RES / block_size.y));
-    assign_final << <grid_size, block_size >> > (shadow_d, mask_d, inside_d, outside_d, image_d);
+    assign_final<<<grid_size, block_size>>>(shadow_d, mask_d, inside_d, outside_d, image_d);
     cudaEventRecord(stop);
     cudaDeviceSynchronize();
     CHECK_KERNELCALL;
@@ -305,7 +305,7 @@ __global__ void compute_mask(
         dim3 grid_size(
             coarse_size / block_size.x,
             coarse_size / block_size.y);
-        fill_block << <grid_size, block_size >> > (h, v, fill);
+        fill_block<<<grid_size, block_size>>>(h, v, fill);
 
     } else if (coarse_size <= COARSE_THRESHOLD) {
 
@@ -314,7 +314,7 @@ __global__ void compute_mask(
         dim3 grid_size(
             coarse_size / block_size.x,
             coarse_size / block_size.y);
-        compute_block << <grid_size, block_size >> > (h, v);
+        compute_block<<<grid_size, block_size>>>(h, v);
 
     } else {
 
@@ -323,7 +323,7 @@ __global__ void compute_mask(
         dim3 grid_size(
             COARSE_FACTOR / block_size.x,
             COARSE_FACTOR / block_size.y);
-        compute_mask << <grid_size, block_size >> > (h, v, coarse_size / COARSE_FACTOR);
+        compute_mask<<<grid_size, block_size>>>(h, v, coarse_size / COARSE_FACTOR);
 
     }
 }
@@ -377,7 +377,7 @@ __device__ bool common_border(const int hpin, const int vpin, const int coarse_s
     // Check block side pixels
     bool *outcome = (bool *)malloc(sizeof(bool));
     *outcome = true;
-    border_pixel << <4, coarse_size - 1 >> > (hpin, vpin, coarse_size, temp, outcome);
+    border_pixel<<<4, coarse_size - 1>>>(hpin, vpin, coarse_size, temp, outcome);
     cudaDeviceSynchronize();
 
     // If all border's pixels require same color, return true
